@@ -1,0 +1,75 @@
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../config/prisma";
+import { requireAuth, AuthRequest } from "../middleware/auth";
+import { requireProjectOwnership } from "../middleware/projectAccess";
+
+const router = Router({ mergeParams: true });
+router.use(requireAuth);
+
+// Planning visuel (point 43) : toutes les publications futures, tous statuts confondus
+router.get("/:projectId/planning", requireProjectOwnership, async (req: AuthRequest & any, res, next) => {
+  try {
+    const from = req.query.from ? new Date(String(req.query.from)) : new Date();
+    const to = req.query.to ? new Date(String(req.query.to)) : new Date(Date.now() + 30 * 24 * 3600 * 1000);
+
+    const posts = await prisma.scheduledPost.findMany({
+      where: { projectId: req.project.id, scheduledFor: { gte: from, lte: to }, isSimulation: false },
+      include: { messageTemplate: { select: { name: true } }, session: { select: { name: true } } },
+      orderBy: { scheduledFor: "asc" },
+    });
+    res.json(posts);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Historique (points 51-52)
+router.get("/:projectId/history", requireProjectOwnership, async (req: AuthRequest & any, res, next) => {
+  try {
+    const status = req.query.status ? String(req.query.status) : undefined;
+    const posts = await prisma.scheduledPost.findMany({
+      where: {
+        projectId: req.project.id,
+        isSimulation: false,
+        ...(status ? { status: status as any } : { status: { in: ["PUBLISHED", "FAILED", "CANCELLED"] } }),
+      },
+      include: { messageTemplate: { select: { name: true } }, session: { select: { name: true } } },
+      orderBy: { scheduledFor: "desc" },
+      take: 200,
+    });
+    res.json(posts);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/:projectId/history/:postId", requireProjectOwnership, async (req: AuthRequest & any, res, next) => {
+  try {
+    const post = await prisma.scheduledPost.findFirst({
+      where: { id: req.params.postId, projectId: req.project.id },
+      include: { messageTemplate: true, session: true, schedule: true },
+    });
+    if (!post) return res.status(404).json({ error: "Publication introuvable." });
+    res.json(post);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Annulation d'une publication future (point 46)
+router.post("/:projectId/posts/:postId/cancel", requireProjectOwnership, async (req: AuthRequest & any, res, next) => {
+  try {
+    const post = await prisma.scheduledPost.findFirst({ where: { id: req.params.postId, projectId: req.project.id } });
+    if (!post) return res.status(404).json({ error: "Publication introuvable." });
+    if (post.status !== "SCHEDULED") {
+      return res.status(400).json({ error: "Seule une publication programmée peut être annulée." });
+    }
+    const updated = await prisma.scheduledPost.update({ where: { id: post.id }, data: { status: "CANCELLED" } });
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default router;

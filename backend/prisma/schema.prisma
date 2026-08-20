@@ -1,0 +1,350 @@
+// =========================================================================
+// Schéma de base de données — Plateforme SaaS d'automatisation Telegram
+// =========================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -------------------------------------------------------------------------
+// UTILISATEURS
+// -------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  projects Project[]
+
+  @@map("users")
+}
+
+// -------------------------------------------------------------------------
+// PROJETS
+// -------------------------------------------------------------------------
+
+enum Platform {
+  TELEGRAM
+}
+
+model Project {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name      String
+  platform  Platform @default(TELEGRAM)
+  timezone  String   @default("UTC")
+
+  // Réglages d'édition par défaut du projet (peuvent être surchargés par message)
+  autoEditDefault       Boolean @default(false)
+  editLevelDefault      EditLevel @default(NORMALE)
+  similarityDefault     Int       @default(50) // 0 = très différent, 100 = très proche
+  preserveEmojisDefault Boolean   @default(true)
+  preservePunctuationDefault Boolean @default(false)
+  signature             String?
+  signatureEnabled      Boolean   @default(false)
+
+  antiRepetitionEnabled Boolean @default(false)
+  antiRepetitionWindow  Int     @default(10) // nb de publications récentes à comparer
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  telegramChannel   TelegramChannel?
+  messageTemplates  MessageTemplate[]
+  protectedVariables ProtectedVariable[]
+  messageVariables  MessageVariable[]
+  schedules         Schedule[]
+  sessions          Session[]
+  scheduledPosts    ScheduledPost[]
+  logs              Log[]
+
+  @@index([userId])
+  @@map("projects")
+}
+
+// -------------------------------------------------------------------------
+// CONNEXION TELEGRAM
+// -------------------------------------------------------------------------
+
+enum TelegramStatus {
+  DISCONNECTED
+  CONNECTED
+  ERROR
+}
+
+model TelegramChannel {
+  id        String   @id @default(uuid())
+  projectId String   @unique
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Le token du bot n'est jamais renvoyé au frontend (voir routes/telegram.ts)
+  botTokenEncrypted String
+  chatId            String
+  chatTitle         String?
+  botUsername       String?
+
+  status        TelegramStatus @default(DISCONNECTED)
+  lastCheckedAt DateTime?
+  lastError     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("telegram_channels")
+}
+
+// -------------------------------------------------------------------------
+// MESSAGES MODÈLES
+// -------------------------------------------------------------------------
+
+enum EditLevel {
+  LEGERE
+  NORMALE
+  IMPORTANTE
+  PERSONNALISEE
+}
+
+model MessageTemplate {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name             String
+  // Le contenu original n'est JAMAIS modifié automatiquement (Règle 1)
+  originalContent  String
+
+  autoEdit         Boolean   @default(false)
+  editLevel        EditLevel @default(NORMALE)
+  customInstructions String?
+  similarity       Int       @default(50)
+
+  preserveEmojis      Boolean @default(true)
+  preservePunctuation Boolean @default(false)
+  requiredElements    String[] @default([])
+
+  signatureOverride     String?
+  signatureEnabledOverride Boolean?
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  schedules      Schedule[]
+  sessions       Session[]
+  scheduledPosts ScheduledPost[]
+
+  @@index([projectId])
+  @@map("message_templates")
+}
+
+// -------------------------------------------------------------------------
+// VARIABLES
+// -------------------------------------------------------------------------
+
+// Variables non modifiables : doivent rester EXACTEMENT identiques (Règle 3)
+model ProtectedVariable {
+  id        String  @id @default(uuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  value       String // le texte exact à protéger, ex: "ABC123" ou une URL
+  label       String?
+  isLink      Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@map("protected_variables")
+}
+
+enum VariableType {
+  TEXT
+  NUMBER
+  DATE
+  TIME
+  DAY
+}
+
+// Variables modifiables : ex {NOM}, {VALEUR}, {DATE}...
+model MessageVariable {
+  id        String       @id @default(uuid())
+  projectId String
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  key       String       // ex: "VALEUR" (utilisé dans le texte comme {VALEUR})
+  type      VariableType @default(TEXT)
+
+  // Pour type TEXT: liste de valeurs possibles (JSON stringifié côté appli, ou une seule valeur)
+  possibleValues String[] @default([])
+
+  // Pour type NUMBER
+  numberMin         Float?
+  numberMax         Float?
+  preferredMin      Float?
+  preferredMax      Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, key])
+  @@index([projectId])
+  @@map("message_variables")
+}
+
+// -------------------------------------------------------------------------
+// PROGRAMMATION (messages ponctuels / récurrents, hors sessions)
+// -------------------------------------------------------------------------
+
+enum RepeatMode {
+  ONCE
+  DAILY
+  CUSTOM_DAYS
+  CUSTOM_DATES
+}
+
+model Schedule {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  messageTemplateId String
+  messageTemplate   MessageTemplate @relation(fields: [messageTemplateId], references: [id], onDelete: Cascade)
+
+  repeatMode RepeatMode @default(ONCE)
+  daysOfWeek Int[]      @default([]) // 0=dimanche ... 6=samedi, utilisé si CUSTOM_DAYS
+  specificDates DateTime[] @default([]) // utilisé si CUSTOM_DATES
+  times      String[]   @default([]) // ex ["09:00","15:00"] heures locales au fuseau du projet
+
+  startDate  DateTime?  // à partir de quelle date le schedule est actif
+  endDate    DateTime?  // optionnel, fin de la récurrence
+
+  active     Boolean    @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  scheduledPosts ScheduledPost[]
+
+  @@index([projectId])
+  @@map("schedules")
+}
+
+// -------------------------------------------------------------------------
+// SESSIONS DE PUBLICATION
+// -------------------------------------------------------------------------
+
+model Session {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name              String
+  messageTemplateId String
+  messageTemplate   MessageTemplate @relation(fields: [messageTemplateId], references: [id], onDelete: Cascade)
+
+  startTime   DateTime // date+heure de début (UTC, calculée depuis le fuseau du projet)
+  durationMin Int      // durée totale en minutes
+  intervalMin Int      // intervalle entre publications en minutes
+
+  // Message avant / après session (optionnels)
+  beforeMessageTemplateId String?
+  beforeMinutesOffset     Int?
+  afterMessageTemplateId  String?
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  scheduledPosts ScheduledPost[]
+
+  @@index([projectId])
+  @@map("sessions")
+}
+
+// -------------------------------------------------------------------------
+// PUBLICATIONS PROGRAMMÉES / HISTORIQUE (une seule table, filtrée par statut)
+// -------------------------------------------------------------------------
+
+enum PostStatus {
+  SCHEDULED
+  PROCESSING
+  PUBLISHED
+  FAILED
+  CANCELLED
+}
+
+model ScheduledPost {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  messageTemplateId String
+  messageTemplate   MessageTemplate @relation(fields: [messageTemplateId], references: [id], onDelete: Cascade)
+
+  scheduleId String?
+  schedule   Schedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+
+  sessionId String?
+  session   Session?  @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  // Identifiant unique métier pour dédupliquer (idempotency key) — voir point 50
+  idempotencyKey String @unique
+
+  scheduledFor DateTime // heure prévue (UTC)
+  publishedAt  DateTime?
+
+  // Contenu réellement envoyé (généré à partir du modèle) — snapshot, ne modifie jamais le modèle
+  generatedContent String?
+  variablesUsed    Json?
+
+  status       PostStatus @default(SCHEDULED)
+  attempts     Int        @default(0)
+  lastError    String?
+
+  isSimulation Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, status, scheduledFor])
+  @@index([status, scheduledFor])
+  @@map("scheduled_posts")
+}
+
+// -------------------------------------------------------------------------
+// LOGS TECHNIQUES
+// -------------------------------------------------------------------------
+
+enum LogLevel {
+  INFO
+  WARN
+  ERROR
+}
+
+model Log {
+  id        String   @id @default(uuid())
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  level     LogLevel @default(INFO)
+  category  String   // ex: "telegram", "scheduler", "publication", "auth"
+  message   String
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([category])
+  @@map("logs")
+}
