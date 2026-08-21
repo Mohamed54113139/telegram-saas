@@ -12,4 +12,5 @@ COPY --from=base /app/.next/standalone ./
 COPY --from=base /app/.next/static ./.next/static
 COPY --from=base /app/public ./public
 EXPOSE 3000
+ENV HOSTNAME="0.0.0.0"
 CMD ["node", "server.js"]
