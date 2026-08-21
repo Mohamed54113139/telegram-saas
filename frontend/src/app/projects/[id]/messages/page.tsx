@@ -9,6 +9,7 @@ interface MessageTemplate {
   id: string;
   name: string;
   originalContent: string;
+  imageUrl?: string | null;
   autoEdit: boolean;
   active: boolean;
 }
@@ -18,6 +19,7 @@ export default function MessagesPage() {
   const [messages, setMessages] = useState<MessageTemplate[]>([]);
   const [name, setName] = useState("");
   const [content, setContent] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -32,8 +34,8 @@ export default function MessagesPage() {
     setCreating(true);
     setError(null);
     try {
-      await apiFetch(`/api/projects/${id}/messages`, { method: "POST", body: JSON.stringify({ name, originalContent: content }) });
-      setName(""); setContent("");
+      await apiFetch(`/api/projects/${id}/messages`, { method: "POST", body: JSON.stringify({ name, originalContent: content, imageUrl: imageUrl || null }) });
+      setName(""); setContent(""); setImageUrl("");
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Création impossible.");
@@ -54,6 +56,8 @@ export default function MessagesPage() {
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Message d'accueil" required />
           <label>Contenu (utilisez {"{VARIABLE}"} pour les variables modifiables)</label>
           <textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder={"Bonjour à tous !\n\nVoici le contenu de votre message.\n\nÀ bientôt."} required />
+          <label>Image (URL, optionnel)</label>
+          <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://exemple.com/image.jpg" />
           {error && <div className="error-box">{error}</div>}
           <div style={{ marginTop: 12 }}>
             <button type="submit" disabled={creating}>{creating ? "Création…" : "Créer le message"}</button>

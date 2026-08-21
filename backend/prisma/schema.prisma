@@ -123,6 +123,7 @@ model MessageTemplate {
   name             String
   // Le contenu original n'est JAMAIS modifié automatiquement (Règle 1)
   originalContent  String
+  imageUrl         String?
 
   autoEdit         Boolean   @default(false)
   editLevel        EditLevel @default(NORMALE)

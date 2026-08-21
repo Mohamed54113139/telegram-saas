@@ -8,6 +8,7 @@ interface MessageTemplate {
   id: string;
   name: string;
   originalContent: string;
+  imageUrl?: string | null;
   autoEdit: boolean;
   editLevel: string;
   customInstructions?: string | null;
@@ -58,6 +59,7 @@ export default function MessageDetailPage() {
         body: JSON.stringify({
           name: msg.name,
           originalContent: msg.originalContent,
+          imageUrl: msg.imageUrl || null,
           autoEdit: msg.autoEdit,
           editLevel: msg.editLevel,
           customInstructions: msg.customInstructions,
@@ -116,6 +118,12 @@ export default function MessageDetailPage() {
     <div>
       <h1>{msg.name}</h1>
 
+      {msg.imageUrl && (
+        <div className="card">
+          <img src={msg.imageUrl} style={{ maxWidth: 300, borderRadius: 8 }} />
+        </div>
+      )}
+
       <form onSubmit={handleSave} className="card">
         <h2>Contenu &amp; édition</h2>
         <label>Nom</label>
@@ -123,6 +131,9 @@ export default function MessageDetailPage() {
 
         <label>Message modèle original</label>
         <textarea value={msg.originalContent} onChange={(e) => setMsg({ ...msg, originalContent: e.target.value })} style={{ minHeight: 140 }} />
+
+        <label>Image (URL)</label>
+        <input value={msg.imageUrl ?? ""} onChange={(e) => setMsg({ ...msg, imageUrl: e.target.value })} placeholder="https://exemple.com/image.jpg" />
 
         <label className="row" style={{ marginTop: 16 }}>
           <input type="checkbox" checked={msg.autoEdit} onChange={(e) => setMsg({ ...msg, autoEdit: e.target.checked })} />

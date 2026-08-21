@@ -3,7 +3,7 @@ import { prisma } from "../config/prisma";
 import { env } from "../config/env";
 import { generateMessageContent } from "../services/contentGenerationService";
 import { decryptSecret } from "../utils/crypto";
-import { sendTelegramMessage } from "../services/telegramService";
+import { sendTelegramMessage, sendTelegramPhoto } from "../services/telegramService";
 import { materializeAllActiveSchedules } from "../services/scheduleMaterializationService";
 import { logEvent } from "../services/logService";
 
@@ -49,7 +49,11 @@ async function processPost(postId: string) {
 
     const generated = await generateMessageContent(post.messageTemplate, post.project);
     const botToken = decryptSecret(channel.botTokenEncrypted);
-    await sendTelegramMessage(botToken, channel.chatId, generated.generatedContent);
+    if (post.messageTemplate.imageUrl) {
+      await sendTelegramPhoto(botToken, channel.chatId, post.messageTemplate.imageUrl, generated.generatedContent);
+    } else {
+      await sendTelegramMessage(botToken, channel.chatId, generated.generatedContent);
+    }
 
     await prisma.scheduledPost.update({
       where: { id: post.id },

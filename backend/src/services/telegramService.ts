@@ -74,3 +74,23 @@ export async function sendTelegramMessage(botToken: string, chatId: string, text
     disable_web_page_preview: false,
   });
 }
+
+// Envoie une photo (via URL) avec légende sur le canal
+export async function sendTelegramPhoto(
+  botToken: string,
+  chatId: string,
+  photoUrl: string,
+  caption?: string
+): Promise<{ message_id: number }> {
+  // La légende d'une photo Telegram est limitée à 1024 caractères (contre
+  // 4096 pour un message texte), on tronque proprement si besoin
+  const trimmedCaption = caption && caption.length > 1024
+    ? caption.slice(0, 1021) + "..."
+    : caption;
+  return callTelegram<{ message_id: number }>(botToken, "sendPhoto", {
+    chat_id: chatId,
+    photo: photoUrl,
+    caption: trimmedCaption,
+    parse_mode: "HTML",
+  });
+}

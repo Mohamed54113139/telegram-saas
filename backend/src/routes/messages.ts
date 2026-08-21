@@ -5,7 +5,7 @@ import { requireAuth, AuthRequest } from "../middleware/auth";
 import { requireProjectOwnership } from "../middleware/projectAccess";
 import { generateMessageContent } from "../services/contentGenerationService";
 import { decryptSecret } from "../utils/crypto";
-import { sendTelegramMessage } from "../services/telegramService";
+import { sendTelegramMessage, sendTelegramPhoto } from "../services/telegramService";
 import { HttpError } from "../middleware/errorHandler";
 
 const router = Router({ mergeParams: true });
@@ -14,6 +14,7 @@ router.use(requireAuth);
 const templateSchema = z.object({
   name: z.string().min(1),
   originalContent: z.string().min(1),
+  imageUrl: z.string().url().nullable().optional(),
   autoEdit: z.boolean().default(false),
   editLevel: z.enum(["LEGERE", "NORMALE", "IMPORTANTE", "PERSONNALISEE"]).default("NORMALE"),
   customInstructions: z.string().nullable().optional(),
@@ -115,7 +116,9 @@ router.post("/:projectId/messages/:messageId/send-test", requireProjectOwnership
 
     const generated = await generateMessageContent(template, req.project, req.body?.overrides);
     const botToken = decryptSecret(channel.botTokenEncrypted);
-    const result = await sendTelegramMessage(botToken, channel.chatId, generated.generatedContent);
+    const result = template.imageUrl
+      ? await sendTelegramPhoto(botToken, channel.chatId, template.imageUrl, generated.generatedContent)
+      : await sendTelegramMessage(botToken, channel.chatId, generated.generatedContent);
 
     res.json({ success: true, messageId: result.message_id, content: generated.generatedContent });
   } catch (err) {
