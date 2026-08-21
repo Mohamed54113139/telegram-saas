@@ -116,7 +116,7 @@ export default function MessageDetailPage() {
 
   if (!msg) return <p className="muted">Chargement…</p>;
 
-  if (msg.sourceChatId) {
+  if (msg.sourceChatId && !msg.originalContent) {
     return (
       <div>
         <h1>{msg.name} <span className="badge muted">Copie</span></h1>
@@ -137,6 +137,13 @@ export default function MessageDetailPage() {
   return (
     <div>
       <h1>{msg.name}</h1>
+
+      {msg.sourceChatId && (
+        <div className="card">
+          <p>Publication copiée depuis {msg.sourceChatId}, message #{msg.sourceMessageId}.</p>
+          <p className="muted">Ceci reformule uniquement la légende du post copié, pas le média (image/vidéo) lui-même.</p>
+        </div>
+      )}
 
       {msg.imageUrl && (
         <div className="card">

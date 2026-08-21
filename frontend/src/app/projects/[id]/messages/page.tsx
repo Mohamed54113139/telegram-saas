@@ -28,6 +28,7 @@ export default function MessagesPage() {
 
   const [linkName, setLinkName] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
+  const [linkCaption, setLinkCaption] = useState("");
   const [linkError, setLinkError] = useState<string | null>(null);
   const [linkCreating, setLinkCreating] = useState(false);
 
@@ -57,8 +58,8 @@ export default function MessagesPage() {
     setLinkCreating(true);
     setLinkError(null);
     try {
-      await apiFetch(`/api/projects/${id}/messages/from-link`, { method: "POST", body: JSON.stringify({ name: linkName, url: linkUrl }) });
-      setLinkName(""); setLinkUrl("");
+      await apiFetch(`/api/projects/${id}/messages/from-link`, { method: "POST", body: JSON.stringify({ name: linkName, url: linkUrl, currentCaption: linkCaption || undefined }) });
+      setLinkName(""); setLinkUrl(""); setLinkCaption("");
       await load();
     } catch (err) {
       setLinkError(err instanceof ApiError ? err.message : "Création impossible.");
@@ -102,6 +103,8 @@ export default function MessagesPage() {
             <input value={linkName} onChange={(e) => setLinkName(e.target.value)} placeholder="Annonce reprise" required />
             <label>Lien Telegram</label>
             <input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://t.me/moncanal/123" required />
+            <label>Légende actuelle du post (optionnel — collez-la ici si vous voulez que l'IA puisse la reformuler ; laissez vide pour une copie brute sans modification)</label>
+            <textarea value={linkCaption} onChange={(e) => setLinkCaption(e.target.value)} placeholder="Légende actuelle du post…" />
             {linkError && <div className="error-box">{linkError}</div>}
             <div style={{ marginTop: 12 }}>
               <button type="submit" disabled={linkCreating}>{linkCreating ? "Création…" : "Copier ce message"}</button>

@@ -100,11 +100,16 @@ export async function copyTelegramMessage(
   botToken: string,
   fromChatId: string,
   toChatId: string,
-  messageId: number
+  messageId: number,
+  caption?: string
 ): Promise<{ message_id: number }> {
+  const trimmedCaption = caption && caption.length > 1024
+    ? caption.slice(0, 1021) + "..."
+    : caption;
   return callTelegram<{ message_id: number }>(botToken, "copyMessage", {
     chat_id: toChatId,
     from_chat_id: fromChatId,
     message_id: messageId,
+    ...(trimmedCaption ? { caption: trimmedCaption, parse_mode: "HTML" } : {}),
   });
 }
