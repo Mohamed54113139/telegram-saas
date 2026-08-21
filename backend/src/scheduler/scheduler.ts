@@ -5,6 +5,7 @@ import { generateMessageContent } from "../services/contentGenerationService";
 import { decryptSecret } from "../utils/crypto";
 import { sendTelegramMessage, sendTelegramPhoto, copyTelegramMessage } from "../services/telegramService";
 import { materializeAllActiveSchedules } from "../services/scheduleMaterializationService";
+import { checkAllActiveSources } from "../services/feedWatcherService";
 import { logEvent } from "../services/logService";
 
 const MAX_ATTEMPTS = 3;
@@ -147,6 +148,7 @@ async function tick() {
   running = true;
   try {
     await materializeAllActiveSchedules();
+    await checkAllActiveSources();
     const claimed = await claimDuePosts();
     for (const id of claimed) {
       await processPost(id);

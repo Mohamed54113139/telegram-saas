@@ -1,6 +1,7 @@
 import { MessageTemplate, MessageVariable, Project, ProtectedVariable } from "@prisma/client";
 import { resolveVariables } from "./variableService";
 import { generateRewrite } from "./aiRewriteService";
+import { resolveDigestVariable } from "./digestService";
 import { prisma } from "../config/prisma";
 
 export interface GeneratedContent {
@@ -19,13 +20,23 @@ export async function generateMessageContent(
   project: Project,
   overrides?: Record<string, string>
 ): Promise<GeneratedContent> {
+  // 0. Variable spéciale {PRONOS_DU_JOUR} : injecte le digest accumulé des
+  // sources en mode digest, puis le vide (consommé). Le modèle original
+  // (template.originalContent) n'est jamais modifié, seule cette copie de
+  // travail l'est (Règle 1).
+  let baseContent = template.originalContent;
+  if (baseContent.includes("{PRONOS_DU_JOUR}")) {
+    const digest = await resolveDigestVariable(project.id);
+    baseContent = baseContent.split("{PRONOS_DU_JOUR}").join(digest);
+  }
+
   const [variables, protectedVars] = await Promise.all([
     prisma.messageVariable.findMany({ where: { projectId: project.id } }),
     prisma.protectedVariable.findMany({ where: { projectId: project.id } }),
   ]);
 
   // 1. Résolution des variables modifiables ({NOM}, {VALEUR}, {DATE}...)
-  const { resolved, usedValues } = resolveVariables(template.originalContent, variables, project.timezone, overrides);
+  const { resolved, usedValues } = resolveVariables(baseContent, variables, project.timezone, overrides);
 
   let finalText = resolved;
   let wasRewritten = false;

@@ -8,6 +8,7 @@ import Topbar from "@/components/Topbar";
 const TABS = [
   { href: "", label: "Dashboard" },
   { href: "/messages", label: "Messages" },
+  { href: "/sources", label: "Sources" },
   { href: "/variables", label: "Variables" },
   { href: "/schedules", label: "Programmation" },
   { href: "/sessions", label: "Sessions" },

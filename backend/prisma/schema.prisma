@@ -68,6 +68,8 @@ model Project {
   sessions          Session[]
   scheduledPosts    ScheduledPost[]
   logs              Log[]
+  contentSources    ContentSource[]
+  digestItems       DigestItem[]
 
   @@index([userId])
   @@map("projects")
@@ -353,4 +355,69 @@ model Log {
   @@index([projectId])
   @@index([category])
   @@map("logs")
+}
+
+// -------------------------------------------------------------------------
+// SOURCES DE VEILLE (flux RSS surveillés automatiquement)
+// -------------------------------------------------------------------------
+
+enum ContentSourceMode {
+  AUTO   // publie automatiquement chaque nouvel élément trouvé
+  MANUAL // crée le message modèle sans le programmer, l'utilisateur décide
+}
+
+model ContentSource {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name    String
+  feedUrl String
+  mode    ContentSourceMode @default(MANUAL)
+  // Mode digest quotidien : accumule le contenu trouvé au lieu de publier
+  // individuellement chaque élément (voir DigestItem / {PRONOS_DU_JOUR})
+  digestMode Boolean @default(false)
+
+  active        Boolean   @default(true)
+  lastCheckedAt DateTime?
+  lastError     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  seenItems ContentSourceItem[]
+
+  @@index([projectId])
+  @@map("content_sources")
+}
+
+// Historique des éléments déjà traités par une source, pour éviter les doublons
+model ContentSourceItem {
+  id              String        @id @default(uuid())
+  contentSourceId String
+  contentSource   ContentSource @relation(fields: [contentSourceId], references: [id], onDelete: Cascade)
+
+  guid String // identifiant unique de l'élément dans le flux (guid, lien, ou titre à défaut)
+
+  createdAt DateTime @default(now())
+
+  @@unique([contentSourceId, guid])
+  @@map("content_source_items")
+}
+
+// Éléments accumulés par une source en mode digest, en attente d'être
+// consommés par la variable {PRONOS_DU_JOUR} au moment de la génération
+model DigestItem {
+  id              String   @id @default(uuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contentSourceId String
+  title           String
+  link            String?
+  summary         String?
+  consumed        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([projectId, consumed])
+  @@map("digest_items")
 }
