@@ -17,6 +17,6 @@ export const env = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? "7d",
   encryptionKey: required("ENCRYPTION_KEY"), // 32 caractères, pour chiffrer les tokens Telegram
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
-  corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:3000",
+  corsOrigins: (process.env.CORS_ORIGIN ?? "http://localhost:3000").split(",").map((o) => o.trim()).filter(Boolean),
   schedulerIntervalSeconds: parseInt(process.env.SCHEDULER_INTERVAL_SECONDS ?? "30", 10),
 };

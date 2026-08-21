@@ -19,7 +19,15 @@ import simulationRoutes from "./routes/simulation";
 const app = express();
 
 app.use(helmet());
-app.use(cors({ origin: env.corsOrigin, credentials: true }));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || env.corsOrigins.includes(origin)) return callback(null, true);
+      callback(new Error("Origine non autorisée par CORS."));
+    },
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: "1mb" }));
 
 // Rate limiting global de protection des API (point 64)
