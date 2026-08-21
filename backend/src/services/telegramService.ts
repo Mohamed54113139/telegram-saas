@@ -94,3 +94,17 @@ export async function sendTelegramPhoto(
     parse_mode: "HTML",
   });
 }
+
+// Copie une publication existante (par son lien) vers le canal cible
+export async function copyTelegramMessage(
+  botToken: string,
+  fromChatId: string,
+  toChatId: string,
+  messageId: number
+): Promise<{ message_id: number }> {
+  return callTelegram<{ message_id: number }>(botToken, "copyMessage", {
+    chat_id: toChatId,
+    from_chat_id: fromChatId,
+    message_id: messageId,
+  });
+}

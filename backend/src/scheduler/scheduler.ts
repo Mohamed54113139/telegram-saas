@@ -3,7 +3,7 @@ import { prisma } from "../config/prisma";
 import { env } from "../config/env";
 import { generateMessageContent } from "../services/contentGenerationService";
 import { decryptSecret } from "../utils/crypto";
-import { sendTelegramMessage, sendTelegramPhoto } from "../services/telegramService";
+import { sendTelegramMessage, sendTelegramPhoto, copyTelegramMessage } from "../services/telegramService";
 import { materializeAllActiveSchedules } from "../services/scheduleMaterializationService";
 import { logEvent } from "../services/logService";
 
@@ -47,8 +47,26 @@ async function processPost(postId: string) {
       throw new Error("Canal Telegram non connecté.");
     }
 
-    const generated = await generateMessageContent(post.messageTemplate, post.project);
     const botToken = decryptSecret(channel.botTokenEncrypted);
+
+    if (post.messageTemplate.sourceChatId && post.messageTemplate.sourceMessageId) {
+      await copyTelegramMessage(botToken, post.messageTemplate.sourceChatId, channel.chatId, post.messageTemplate.sourceMessageId);
+
+      await prisma.scheduledPost.update({
+        where: { id: post.id },
+        data: {
+          status: "PUBLISHED",
+          publishedAt: new Date(),
+          generatedContent: "[Publication copiée depuis Telegram]",
+          attempts: { increment: 1 },
+        },
+      });
+
+      await logEvent({ projectId: post.projectId, category: "publication", message: "Publication (copie) envoyée avec succès.", metadata: { postId: post.id } });
+      return;
+    }
+
+    const generated = await generateMessageContent(post.messageTemplate, post.project);
     if (post.messageTemplate.imageUrl) {
       await sendTelegramPhoto(botToken, channel.chatId, post.messageTemplate.imageUrl, generated.generatedContent);
     } else {

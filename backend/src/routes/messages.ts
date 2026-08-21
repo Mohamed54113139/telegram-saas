@@ -5,7 +5,8 @@ import { requireAuth, AuthRequest } from "../middleware/auth";
 import { requireProjectOwnership } from "../middleware/projectAccess";
 import { generateMessageContent } from "../services/contentGenerationService";
 import { decryptSecret } from "../utils/crypto";
-import { sendTelegramMessage, sendTelegramPhoto } from "../services/telegramService";
+import { sendTelegramMessage, sendTelegramPhoto, copyTelegramMessage } from "../services/telegramService";
+import { parseTelegramPostUrl } from "../utils/telegramLink";
 import { HttpError } from "../middleware/errorHandler";
 
 const router = Router({ mergeParams: true });
@@ -45,6 +46,34 @@ router.post("/:projectId/messages", requireProjectOwnership, async (req: AuthReq
     const data = templateSchema.parse(req.body);
     const message = await prisma.messageTemplate.create({
       data: { projectId: req.project.id, ...data },
+    });
+    res.status(201).json(message);
+  } catch (err) {
+    next(err);
+  }
+});
+
+const fromLinkSchema = z.object({
+  name: z.string().min(1),
+  url: z.string().min(1),
+});
+
+// Création d'un message "copie" d'une publication Telegram existante, via son lien
+router.post("/:projectId/messages/from-link", requireProjectOwnership, async (req: AuthRequest & any, res, next) => {
+  try {
+    const { name, url } = fromLinkSchema.parse(req.body);
+    const parsed = parseTelegramPostUrl(url);
+    if (!parsed) return res.status(400).json({ error: "Lien Telegram invalide." });
+
+    const message = await prisma.messageTemplate.create({
+      data: {
+        projectId: req.project.id,
+        name,
+        originalContent: "(Publication copiée depuis Telegram)",
+        sourceChatId: parsed.chatId,
+        sourceMessageId: parsed.messageId,
+        autoEdit: false,
+      },
     });
     res.status(201).json(message);
   } catch (err) {
@@ -114,8 +143,14 @@ router.post("/:projectId/messages/:messageId/send-test", requireProjectOwnership
       throw new HttpError(400, "Aucun canal Telegram connecté.");
     }
 
-    const generated = await generateMessageContent(template, req.project, req.body?.overrides);
     const botToken = decryptSecret(channel.botTokenEncrypted);
+
+    if (template.sourceChatId && template.sourceMessageId) {
+      const result = await copyTelegramMessage(botToken, template.sourceChatId, channel.chatId, template.sourceMessageId);
+      return res.json({ success: true, messageId: result.message_id, content: "[Publication copiée depuis Telegram]" });
+    }
+
+    const generated = await generateMessageContent(template, req.project, req.body?.overrides);
     const result = template.imageUrl
       ? await sendTelegramPhoto(botToken, channel.chatId, template.imageUrl, generated.generatedContent)
       : await sendTelegramMessage(botToken, channel.chatId, generated.generatedContent);

@@ -125,6 +125,11 @@ model MessageTemplate {
   originalContent  String
   imageUrl         String?
 
+  // Présence simultanée = ce message est une copie d'un post Telegram existant ;
+  // dans ce cas, originalContent/imageUrl/autoEdit/etc. sont ignorés à l'envoi
+  sourceChatId     String?
+  sourceMessageId  Int?
+
   autoEdit         Boolean   @default(false)
   editLevel        EditLevel @default(NORMALE)
   customInstructions String?

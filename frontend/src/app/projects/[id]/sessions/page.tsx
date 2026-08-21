@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { apiFetch, ApiError } from "@/lib/api";
 
-interface MessageTemplate { id: string; name: string; }
+interface MessageTemplate { id: string; name: string; sourceChatId?: string | null; }
 interface SessionItem {
   id: string;
   name: string;
@@ -101,7 +101,7 @@ export default function SessionsPage() {
 
           <label>Message</label>
           <select value={messageTemplateId} onChange={(e) => setMessageTemplateId(e.target.value)}>
-            {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.sourceChatId ? " (Copie)" : ""}</option>)}
           </select>
 
           <div className="row">

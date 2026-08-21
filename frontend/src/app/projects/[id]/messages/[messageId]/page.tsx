@@ -9,6 +9,8 @@ interface MessageTemplate {
   name: string;
   originalContent: string;
   imageUrl?: string | null;
+  sourceChatId?: string | null;
+  sourceMessageId?: number | null;
   autoEdit: boolean;
   editLevel: string;
   customInstructions?: string | null;
@@ -113,6 +115,24 @@ export default function MessageDetailPage() {
   }
 
   if (!msg) return <p className="muted">Chargement…</p>;
+
+  if (msg.sourceChatId) {
+    return (
+      <div>
+        <h1>{msg.name} <span className="badge muted">Copie</span></h1>
+        <div className="card">
+          <p>Publication copiée depuis {msg.sourceChatId}, message #{msg.sourceMessageId}</p>
+          <p className="muted">Ce message republie tel quel un post Telegram existant ; le contenu, l'image et les réglages de reformulation ne s'appliquent pas ici.</p>
+          {error && <div className="error-box">{error}</div>}
+          {success && <div className="success-box">{success}</div>}
+          <div className="row" style={{ marginTop: 14 }}>
+            <button type="button" className="secondary" onClick={handleSendTest} disabled={sending}>{sending ? "Envoi…" : "Envoyer un message test"}</button>
+            <button type="button" className="danger" onClick={handleDelete}>Supprimer</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
