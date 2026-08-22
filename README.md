@@ -45,7 +45,8 @@ telegram-saas/
 | `JWT_SECRET` | Secret pour signer les tokens d'authentification (chaîne longue et aléatoire) |
 | `JWT_EXPIRES_IN` | Durée de validité des sessions (ex: `7d`) |
 | `ENCRYPTION_KEY` | Clé utilisée pour chiffrer les tokens Telegram en base (32 caractères minimum) |
-| `ANTHROPIC_API_KEY` | Clé API Anthropic pour la reformulation automatique (optionnelle — si absente, la reformulation est simplement ignorée et le message original est utilisé) |
+| `OPENAI_API_KEY` | Clé API OpenAI pour la reformulation automatique (optionnelle — si absente, la reformulation est simplement ignorée et le message original est utilisé) |
+| `OPENAI_MODEL` | Modèle OpenAI utilisé pour la reformulation (défaut `gpt-4o-mini`) |
 | `PORT` | Port du serveur API (défaut `4000`) |
 | `CORS_ORIGIN` | URL du frontend autorisée en CORS |
 | `SCHEDULER_INTERVAL_SECONDS` | Intervalle entre deux cycles du scheduler (défaut `30`) |
@@ -73,7 +74,7 @@ Si vous n'utilisez pas Docker pour Postgres, créez une base `telegram_saas` et 
 ```bash
 cd backend
 cp .env.example .env
-# éditez .env : DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY, éventuellement ANTHROPIC_API_KEY
+# éditez .env : DATABASE_URL, JWT_SECRET, ENCRYPTION_KEY, éventuellement OPENAI_API_KEY
 
 npm install
 npx prisma generate
@@ -120,7 +121,7 @@ cd telegram-saas
 cat > .env << 'ENVEOF'
 JWT_SECRET=une-longue-chaine-aleatoire
 ENCRYPTION_KEY=une-autre-chaine-de-32-caracteres-minimum
-ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
 CORS_ORIGIN=https://votre-domaine.com
 NEXT_PUBLIC_API_URL=https://api.votre-domaine.com
 ENVEOF
@@ -161,7 +162,7 @@ Le scheduler tourne **dans le conteneur backend**, indépendamment du navigateur
 - Authentification complète (JWT + bcrypt), isolation stricte des données par utilisateur et par projet.
 - Multi-projets indépendants, chacun avec son propre canal Telegram, ses messages, variables, programmations et historique.
 - Connexion Telegram via l'API officielle, avec vérification du bot, du canal et des permissions ; token chiffré en base (AES-256-GCM), jamais exposé au frontend ni dans les logs.
-- Messages modèles : le contenu original n'est **jamais** modifié automatiquement. La reformulation IA (optionnelle, via l'API Anthropic) respecte strictement les variables non modifiables et les éléments obligatoires — toute violation entraîne un retour automatique au texte original.
+- Messages modèles : le contenu original n'est **jamais** modifié automatiquement. La reformulation IA (optionnelle, via l'API OpenAI) respecte strictement les variables non modifiables et les éléments obligatoires — toute violation entraîne un retour automatique au texte original.
 - Variables non modifiables et modifiables (texte, nombre avec bornes, dates/heures automatiques).
 - Programmation par jour(s)/date(s)/heure(s), avec recalcul automatique lors d'une modification.
 - Sessions de publication avec calcul automatique du nombre de publications à partir du début, de la durée et de l'intervalle.
