@@ -31,6 +31,18 @@ export function resolveVariables(
     }
   }
 
+  // Variables d'heure décalée inline, ex: {HEURE+10}, {HEURE+15}
+  // (placé après le remplacement de {HEURE} seul, mais ce dernier est ancré exactement
+  // sur "{HEURE}" donc ne capture jamais {HEURE+10} — aucun risque de collision entre les deux)
+  const offsetPattern = /\{HEURE\+(\d+)\}/g;
+  resolved = resolved.replace(offsetPattern, (match, minutesStr) => {
+    const minutes = parseInt(minutesStr, 10);
+    const target = new Date(now.getTime() + minutes * 60_000);
+    const value = fmtTime.format(target);
+    usedValues[`HEURE+${minutes}`] = value;
+    return value;
+  });
+
   for (const v of variables) {
     const pattern = new RegExp(`\\{${escapeRegExp(v.key)}\\}`, "g");
     if (!pattern.test(resolved)) continue;
