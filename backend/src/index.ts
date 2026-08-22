@@ -30,7 +30,7 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "10mb" }));
 
 // Rate limiting global de protection des API (point 64)
 app.use(

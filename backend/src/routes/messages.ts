@@ -8,9 +8,24 @@ import { decryptSecret } from "../utils/crypto";
 import { sendTelegramMessage, sendTelegramPhoto, copyTelegramMessage } from "../services/telegramService";
 import { parseTelegramPostUrl } from "../utils/telegramLink";
 import { HttpError } from "../middleware/errorHandler";
+import { uploadImageToImgbb } from "../services/imgbbService";
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
+
+// Upload d'une image (base64) vers ImgBB, retourne le lien direct à utiliser comme imageUrl.
+router.post("/:projectId/upload-image", requireProjectOwnership, async (req: AuthRequest & any, res, next) => {
+  try {
+    const { imageBase64 } = req.body;
+    if (!imageBase64 || typeof imageBase64 !== "string") {
+      return res.status(400).json({ error: "Image manquante." });
+    }
+    const url = await uploadImageToImgbb(imageBase64);
+    res.json({ url });
+  } catch (err) {
+    next(err);
+  }
+});
 
 const templateSchema = z.object({
   name: z.string().min(1),

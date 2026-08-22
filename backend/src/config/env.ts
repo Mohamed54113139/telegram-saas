@@ -18,6 +18,7 @@ export const env = {
   encryptionKey: required("ENCRYPTION_KEY"), // 32 caractères, pour chiffrer les tokens Telegram
   openaiApiKey: process.env.OPENAI_API_KEY ?? "",
   openaiModel: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+  imgbbApiKey: process.env.IMGBB_API_KEY ?? "",
   corsOrigins: (process.env.CORS_ORIGIN ?? "http://localhost:3000").split(",").map((o) => o.trim()).filter(Boolean),
   schedulerIntervalSeconds: parseInt(process.env.SCHEDULER_INTERVAL_SECONDS ?? "30", 10),
 };

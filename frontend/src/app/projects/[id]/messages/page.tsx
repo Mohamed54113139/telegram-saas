@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch, ApiError } from "@/lib/api";
+import ImageUploadField from "@/components/ImageUploadField";
 
 interface MessageTemplate {
   id: string;
@@ -86,8 +87,7 @@ export default function MessagesPage() {
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Message d'accueil" required />
             <label>Contenu (utilisez {"{VARIABLE}"} pour les variables modifiables)</label>
             <textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder={"Bonjour à tous !\n\nVoici le contenu de votre message.\n\nÀ bientôt."} required />
-            <label>Image (URL, optionnel)</label>
-            <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://exemple.com/image.jpg" />
+            <ImageUploadField projectId={id} value={imageUrl} onChange={setImageUrl} />
             {error && <div className="error-box">{error}</div>}
             <div style={{ marginTop: 12 }}>
               <button type="submit" disabled={creating}>{creating ? "Création…" : "Créer le message"}</button>

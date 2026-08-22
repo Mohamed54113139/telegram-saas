@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch, ApiError } from "@/lib/api";
+import ImageUploadField from "@/components/ImageUploadField";
 
 interface MessageTemplate {
   id: string;
@@ -159,8 +160,7 @@ export default function MessageDetailPage() {
         <label>Message modèle original</label>
         <textarea value={msg.originalContent} onChange={(e) => setMsg({ ...msg, originalContent: e.target.value })} style={{ minHeight: 140 }} />
 
-        <label>Image (URL)</label>
-        <input value={msg.imageUrl ?? ""} onChange={(e) => setMsg({ ...msg, imageUrl: e.target.value })} placeholder="https://exemple.com/image.jpg" />
+        <ImageUploadField projectId={id} value={msg.imageUrl ?? ""} onChange={(url) => setMsg({ ...msg, imageUrl: url })} />
 
         <label className="row" style={{ marginTop: 16 }}>
           <input type="checkbox" checked={msg.autoEdit} onChange={(e) => setMsg({ ...msg, autoEdit: e.target.checked })} />
