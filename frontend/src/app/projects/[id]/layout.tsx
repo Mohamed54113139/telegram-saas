@@ -15,6 +15,7 @@ const TABS = [
   { href: "/sessions", label: "Sessions" },
   { href: "/planning", label: "Planning" },
   { href: "/history", label: "Historique" },
+  { href: "/suggestions", label: "Suggestions" },
   { href: "/telegram", label: "Telegram" },
 ];
 

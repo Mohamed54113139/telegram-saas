@@ -31,6 +31,13 @@ interface PreviewResult {
   rewriteIssues: string[];
 }
 
+interface SuggestionResult {
+  id: string;
+  currentInstructions: string | null;
+  suggestedInstructions: string;
+  reasoning: string;
+}
+
 export default function MessageDetailPage() {
   const { id, messageId } = useParams<{ id: string; messageId: string }>();
   const router = useRouter();
@@ -42,6 +49,9 @@ export default function MessageDetailPage() {
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [sending, setSending] = useState(false);
+  const [suggestion, setSuggestion] = useState<SuggestionResult | null>(null);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
 
   async function load() {
     const data = await apiFetch<MessageTemplate>(`/api/projects/${id}/messages/${messageId}`);
@@ -106,6 +116,20 @@ export default function MessageDetailPage() {
       setError(err instanceof ApiError ? err.message : "Envoi impossible.");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleSuggestImprovement() {
+    setSuggesting(true);
+    setSuggestionError(null);
+    setSuggestion(null);
+    try {
+      const result = await apiFetch<SuggestionResult>(`/api/projects/${id}/messages/${messageId}/suggest-improvement`, { method: "POST", body: JSON.stringify({}) });
+      setSuggestion(result);
+    } catch (err) {
+      setSuggestionError(err instanceof ApiError ? err.message : "Analyse impossible.");
+    } finally {
+      setSuggesting(false);
     }
   }
 
@@ -202,9 +226,25 @@ export default function MessageDetailPage() {
           <button type="submit" disabled={saving}>{saving ? "Enregistrement…" : "Enregistrer"}</button>
           <button type="button" className="secondary" onClick={handlePreview} disabled={previewing}>{previewing ? "Génération…" : "Tester (aperçu)"}</button>
           <button type="button" className="secondary" onClick={handleSendTest} disabled={sending}>{sending ? "Envoi…" : "Envoyer un message test"}</button>
+          <button type="button" className="secondary" onClick={handleSuggestImprovement} disabled={suggesting}>{suggesting ? "Analyse…" : "Analyser les retours"}</button>
           <button type="button" className="danger" onClick={handleDelete}>Supprimer</button>
         </div>
       </form>
+
+      {suggestionError && <div className="error-box">{suggestionError}</div>}
+
+      {suggestion && (
+        <div className="card">
+          <h2>Suggestion d'amélioration</h2>
+          <h3>Instructions actuelles</h3>
+          <p className="muted" style={{ whiteSpace: "pre-wrap" }}>{suggestion.currentInstructions || "(aucune)"}</p>
+          <h3>Instructions suggérées</h3>
+          <p style={{ whiteSpace: "pre-wrap" }}>{suggestion.suggestedInstructions}</p>
+          <h3>Raisonnement</h3>
+          <p className="muted">{suggestion.reasoning}</p>
+          <p className="muted">Rendez-vous dans l'onglet "Suggestions" du projet pour approuver ou rejeter cette proposition.</p>
+        </div>
+      )}
 
       {preview && (
         <div className="card">

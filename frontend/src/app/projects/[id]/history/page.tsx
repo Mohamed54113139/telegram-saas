@@ -11,6 +11,7 @@ interface Post {
   status: string;
   generatedContent?: string | null;
   lastError?: string | null;
+  feedback?: "POSITIVE" | "NEGATIVE" | null;
   messageTemplate: { name: string };
 }
 
@@ -29,6 +30,14 @@ export default function HistoryPage() {
     setPosts(data);
   }
   useEffect(() => { load(); }, [id, filter]);
+
+  async function handleFeedback(postId: string, feedback: "POSITIVE" | "NEGATIVE") {
+    const updated = await apiFetch<Post>(`/api/projects/${id}/posts/${postId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ feedback }),
+    });
+    setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, feedback: updated.feedback } : p)));
+  }
 
   return (
     <div>
@@ -58,6 +67,24 @@ export default function HistoryPage() {
                       {p.publishedAt && <p className="muted">Publié le {new Date(p.publishedAt).toLocaleString("fr-FR")}</p>}
                       {p.generatedContent && <p style={{ whiteSpace: "pre-wrap" }}>{p.generatedContent}</p>}
                       {p.lastError && <div className="error-box">{p.lastError}</div>}
+                      {p.status === "PUBLISHED" && (
+                        <div className="row" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className={p.feedback === "POSITIVE" ? "" : "secondary"}
+                            onClick={() => handleFeedback(p.id, "POSITIVE")}
+                          >
+                            👍
+                          </button>
+                          <button
+                            type="button"
+                            className={p.feedback === "NEGATIVE" ? "" : "secondary"}
+                            onClick={() => handleFeedback(p.id, "NEGATIVE")}
+                          >
+                            👎
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 )}

@@ -70,6 +70,7 @@ model Project {
   logs              Log[]
   contentSources    ContentSource[]
   digestItems       DigestItem[]
+  instructionSuggestions InstructionSuggestion[]
 
   @@index([userId])
   @@map("projects")
@@ -151,6 +152,7 @@ model MessageTemplate {
   schedules      Schedule[]
   sessions       Session[]
   scheduledPosts ScheduledPost[]
+  instructionSuggestions InstructionSuggestion[]
 
   @@index([projectId])
   @@map("message_templates")
@@ -292,6 +294,11 @@ enum PostStatus {
   CANCELLED
 }
 
+enum FeedbackType {
+  POSITIVE
+  NEGATIVE
+}
+
 model ScheduledPost {
   id        String   @id @default(uuid())
   projectId String
@@ -321,6 +328,7 @@ model ScheduledPost {
   lastError    String?
 
   isSimulation Boolean @default(false)
+  feedback     FeedbackType?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -420,4 +428,27 @@ model DigestItem {
 
   @@index([projectId, consumed])
   @@map("digest_items")
+}
+
+// -------------------------------------------------------------------------
+// SUGGESTIONS D'AMÉLIORATION DES INSTRUCTIONS (à partir des retours 👍/👎)
+// -------------------------------------------------------------------------
+
+model InstructionSuggestion {
+  id                    String   @id @default(uuid())
+  projectId             String
+  project               Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  messageTemplateId     String
+  messageTemplate       MessageTemplate @relation(fields: [messageTemplateId], references: [id], onDelete: Cascade)
+
+  currentInstructions   String?
+  suggestedInstructions String
+  reasoning             String
+
+  status                String   @default("PENDING") // PENDING, APPROVED, REJECTED
+
+  createdAt             DateTime @default(now())
+
+  @@index([projectId, status])
+  @@map("instruction_suggestions")
 }

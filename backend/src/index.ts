@@ -17,6 +17,7 @@ import postRoutes from "./routes/posts";
 import simulationRoutes from "./routes/simulation";
 import sourceRoutes from "./routes/sources";
 import assistantRoutes from "./routes/assistant";
+import suggestionRoutes from "./routes/suggestions";
 
 const app = express();
 
@@ -55,6 +56,7 @@ app.use("/api/projects", postRoutes);
 app.use("/api/projects", simulationRoutes);
 app.use("/api/projects", sourceRoutes);
 app.use("/api/projects", assistantRoutes);
+app.use("/api/projects", suggestionRoutes);
 
 app.use((req, res) => res.status(404).json({ error: "Route introuvable." }));
 app.use(errorHandler);
