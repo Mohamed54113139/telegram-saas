@@ -17,6 +17,7 @@ const TABS = [
   { href: "/history", label: "Historique" },
   { href: "/suggestions", label: "Suggestions" },
   { href: "/telegram", label: "Telegram" },
+  { href: "/settings", label: "Paramètres" },
 ];
 
 export default function ProjectLayout({ children }: { children: React.ReactNode }) {
