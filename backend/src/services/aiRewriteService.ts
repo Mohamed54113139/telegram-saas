@@ -1,9 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { env } from "../config/env";
 import { verifyProtectedVariablesPresent, verifyRequiredElementsPresent } from "./variableService";
 import { logEvent } from "./logService";
 
-const client = env.anthropicApiKey ? new Anthropic({ apiKey: env.anthropicApiKey }) : null;
+const client = env.openaiApiKey ? new OpenAI({ apiKey: env.openaiApiKey }) : null;
 
 export type EditLevel = "LEGERE" | "NORMALE" | "IMPORTANTE" | "PERSONNALISEE";
 
@@ -31,11 +31,6 @@ const LEVEL_INSTRUCTIONS: Record<EditLevel, string> = {
 // - les éléments obligatoires
 // - ne doit JAMAIS inventer de faits, chiffres ou informations non présents dans le contenu fourni
 export async function generateRewrite(options: RewriteOptions): Promise<{ text: string; verified: boolean; issues: string[] }> {
-  if (!client) {
-    // Pas de clé API configurée : on retourne le contenu original inchangé plutôt que d'échouer silencieusement
-    return { text: options.content, verified: true, issues: ["ANTHROPIC_API_KEY non configurée : reformulation ignorée."] };
-  }
-
   const protectedList = options.protectedValues.map((v) => `- "${v}"`).join("\n") || "(aucune)";
   const requiredList = options.requiredElements.map((v) => `- "${v}"`).join("\n") || "(aucun)";
   const recentList = (options.recentVariants ?? []).slice(0, 20).map((v, i) => `${i + 1}. ${v}`).join("\n");
@@ -65,15 +60,21 @@ ${options.editLevel === "PERSONNALISEE" && options.customInstructions ? `Instruc
 ${similarityInstruction}
 ${recentList ? `\nÉvite de produire une variante trop similaire à ces publications récentes :\n${recentList}` : ""}`;
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
+  if (!client) {
+    // Pas de clé API configurée : on retourne le contenu original inchangé plutôt que d'échouer silencieusement
+    return { text: options.content, verified: true, issues: ["OPENAI_API_KEY non configurée : reformulation ignorée."] };
+  }
+
+  const response = await client.chat.completions.create({
+    model: env.openaiModel,
     max_tokens: 1000,
-    system: systemPrompt,
-    messages: [{ role: "user", content: `Texte original à reformuler :\n\n${options.content}` }],
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `Texte original à reformuler :\n\n${options.content}` },
+    ],
   });
 
-  const textBlock = response.content.find((b) => b.type === "text");
-  const generated = textBlock && "text" in textBlock ? textBlock.text.trim() : options.content;
+  const generated = response.choices[0]?.message?.content?.trim() ?? options.content;
 
   const protectedCheck = verifyProtectedVariablesPresent(generated, options.protectedValues);
   const requiredCheck = verifyRequiredElementsPresent(generated, options.requiredElements);
