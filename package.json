@@ -1,0 +1,9 @@
+{
+  "name": "telegram-saas",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serveur combiné (API Express + frontend Next.js) pour le déploiement Render en un seul processus/port.",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

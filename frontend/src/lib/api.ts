@@ -1,17 +1,3 @@
-let cachedApiUrl: string | null = null;
-
-async function getApiUrl(): Promise<string> {
-  if (cachedApiUrl) return cachedApiUrl;
-  try {
-    const res = await fetch("/api/runtime-config");
-    const data = await res.json();
-    cachedApiUrl = data.apiUrl ?? "http://localhost:4000";
-  } catch {
-    cachedApiUrl = "http://localhost:4000";
-  }
-  return cachedApiUrl ?? "http://localhost:4000";
-}
-
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem("token");
@@ -31,12 +17,13 @@ export class ApiError extends Error {
   }
 }
 
-// Client API générique. Toutes les routes protégées passent par ici avec le
-// token JWT en en-tête Authorization.
+// Client API générique. Le frontend et l'API sont servis depuis la même
+// origine (serveur combiné), donc les chemins /api/... sont relatifs.
+// Toutes les routes protégées passent par ici avec le token JWT en en-tête
+// Authorization.
 export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
-  const apiUrl = await getApiUrl();
-  const res = await fetch(`${apiUrl}${path}`, {
+  const res = await fetch(path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
