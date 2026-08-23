@@ -13,6 +13,7 @@ const sourceSchema = z.object({
   feedUrl: z.string().url(),
   mode: z.enum(["AUTO", "MANUAL"]).default("MANUAL"),
   digestMode: z.boolean().default(false),
+  checkIntervalMinutes: z.number().int().positive().default(60),
 });
 
 // Liste des sources de veille d'un projet

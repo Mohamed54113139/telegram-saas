@@ -386,6 +386,11 @@ model ContentSource {
   // individuellement chaque élément (voir DigestItem / {PRONOS_DU_JOUR})
   digestMode Boolean @default(false)
 
+  // Délai minimum (en minutes) entre deux vérifications de cette source ;
+  // le scheduler tourne bien plus souvent, mais ne re-vérifie une source
+  // que si ce délai est écoulé depuis lastCheckedAt (voir feedWatcherService).
+  checkIntervalMinutes Int @default(60)
+
   active        Boolean   @default(true)
   lastCheckedAt DateTime?
   lastError     String?

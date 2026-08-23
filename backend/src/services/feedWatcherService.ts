@@ -5,6 +5,23 @@ import { logEvent } from "./logService";
 
 const parser = new Parser();
 
+// Filtre par mots-clés football : un article n'est retenu que si son titre
+// contient au moins un de ces mots (insensible à la casse).
+const FOOTBALL_KEYWORDS = ["football", "foot", "match", "pronostic", "predictions", "tips", "betting"];
+
+function matchesFootballKeywords(title: string): boolean {
+  const lower = title.toLowerCase();
+  return FOOTBALL_KEYWORDS.some((keyword) => lower.includes(keyword));
+}
+
+// Une source n'est revérifiée que si son intervalle (checkIntervalMinutes)
+// est écoulé depuis la dernière vérification.
+function isDueForCheck(source: ContentSource): boolean {
+  if (!source.lastCheckedAt) return true;
+  const dueAt = source.lastCheckedAt.getTime() + source.checkIntervalMinutes * 60_000;
+  return Date.now() >= dueAt;
+}
+
 // Un élément est considéré comme déjà traité s'il a déjà une entrée
 // ContentSourceItem pour cette source (déduplication par guid/lien/titre).
 async function isDuplicate(contentSourceId: string, guid: string): Promise<boolean> {
@@ -30,6 +47,8 @@ export async function checkSource(source: ContentSource): Promise<void> {
       await prisma.contentSourceItem.create({ data: { contentSourceId: source.id, guid } });
 
       const title = item.title ?? "Sans titre";
+      if (!matchesFootballKeywords(title)) continue;
+
       const link = item.link ?? null;
       const summary = item.contentSnippet ?? item.content ?? null;
 
@@ -87,6 +106,7 @@ export async function checkSource(source: ContentSource): Promise<void> {
 export async function checkAllActiveSources(): Promise<void> {
   const sources = await prisma.contentSource.findMany({ where: { active: true } });
   for (const source of sources) {
+    if (!isDueForCheck(source)) continue;
     await checkSource(source);
   }
 }
