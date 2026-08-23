@@ -1,9 +1,32 @@
+import fetch from "node-fetch";
 import Parser from "rss-parser";
 import { ContentSource } from "@prisma/client";
 import { prisma } from "../config/prisma";
 import { logEvent } from "./logService";
 
 const parser = new Parser();
+
+// Certains flux RSS mal formés contiennent des "&" isolés (ex: "Ligue 1 & 2",
+// des URL non échappées...) qui font planter le parseur XML. On échappe tout
+// "&" qui n'est pas déjà le début d'une entité valide, avant de parser.
+const RAW_AMPERSAND_PATTERN = /&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[0-9a-fA-F]+;)/g;
+
+function sanitizeFeedXml(raw: string): string {
+  return raw.replace(RAW_AMPERSAND_PATTERN, "&amp;");
+}
+
+// Récupère le flux en texte brut (plutôt que de laisser rss-parser faire sa
+// propre requête), nettoie le XML, puis le parse — appliqué à toutes les
+// sources pour se protéger de flux mal formés.
+async function fetchAndParseFeed(feedUrl: string) {
+  const res = await fetch(feedUrl);
+  if (!res.ok) {
+    throw new Error(`Impossible de récupérer le flux (HTTP ${res.status}).`);
+  }
+  const raw = await res.text();
+  const sanitized = sanitizeFeedXml(raw);
+  return parser.parseString(sanitized);
+}
 
 // Filtre par mots-clés football : un article n'est retenu que si son titre
 // contient au moins un de ces mots (insensible à la casse).
@@ -34,7 +57,7 @@ async function isDuplicate(contentSourceId: string, guid: string): Promise<boole
 // Vérifie un flux RSS et traite chaque nouvel élément trouvé.
 export async function checkSource(source: ContentSource): Promise<void> {
   try {
-    const feed = await parser.parseURL(source.feedUrl);
+    const feed = await fetchAndParseFeed(source.feedUrl);
 
     for (const item of feed.items ?? []) {
       const guid = item.guid || item.link || item.title;
@@ -96,8 +119,8 @@ export async function checkSource(source: ContentSource): Promise<void> {
       projectId: source.projectId,
       level: "ERROR",
       category: "feedWatcher",
-      message: "Échec de vérification d'une source de veille.",
-      metadata: { sourceId: source.id, error: err?.message },
+      message: `Échec de vérification de la source "${source.name}".`,
+      metadata: { sourceId: source.id, sourceName: source.name, error: err?.message },
     });
   }
 }
