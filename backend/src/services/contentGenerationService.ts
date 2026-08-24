@@ -36,7 +36,13 @@ export async function generateMessageContent(
   ]);
 
   // 1. Résolution des variables modifiables ({NOM}, {VALEUR}, {DATE}...)
-  const { resolved, usedValues } = resolveVariables(baseContent, variables, project.timezone, overrides);
+  const { resolved, usedValues } = resolveVariables(
+    baseContent,
+    variables,
+    project.timezone,
+    { randomMinMinutes: template.randomMinMinutes, randomMaxMinutes: template.randomMaxMinutes },
+    overrides
+  );
 
   let finalText = resolved;
   let wasRewritten = false;

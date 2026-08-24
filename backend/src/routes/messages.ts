@@ -40,6 +40,8 @@ const templateSchema = z.object({
   requiredElements: z.array(z.string()).default([]),
   signatureOverride: z.string().nullable().optional(),
   signatureEnabledOverride: z.boolean().nullable().optional(),
+  randomMinMinutes: z.number().int().nullable().optional(),
+  randomMaxMinutes: z.number().int().nullable().optional(),
 });
 
 // Liste des messages modèles d'un projet (point 9)

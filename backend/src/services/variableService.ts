@@ -6,6 +6,7 @@ export function resolveVariables(
   content: string,
   variables: MessageVariable[],
   timezone: string,
+  randomTimeRange: { randomMinMinutes?: number | null; randomMaxMinutes?: number | null } = {},
   overrides?: Record<string, string>
 ): { resolved: string; usedValues: Record<string, string> } {
   const usedValues: Record<string, string> = {};
@@ -15,6 +16,25 @@ export function resolveVariables(
   const fmt = new Intl.DateTimeFormat("fr-FR", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" });
   const fmtTime = new Intl.DateTimeFormat("fr-FR", { timeZone: timezone, hour: "2-digit", minute: "2-digit" });
   const fmtDay = new Intl.DateTimeFormat("fr-FR", { timeZone: timezone, weekday: "long" });
+
+  // Variable {HEURE+ALEATOIRE} : heure actuelle + un délai aléatoire (en
+  // minutes), tiré entre randomMinMinutes/randomMaxMinutes du modèle (5 à 15
+  // minutes par défaut si non définis). Traité AVANT {HEURE} pour rester
+  // indépendant de son remplacement générique. Le tirage se refait à chaque
+  // appel de resolveVariables, donc à chaque envoi réel (scheduler), pas à
+  // la création du message.
+  const randomHeurePattern = /\{HEURE\+ALEATOIRE\}/g;
+  resolved = resolved.replace(randomHeurePattern, () => {
+    const min = randomTimeRange.randomMinMinutes ?? 5;
+    const max = randomTimeRange.randomMaxMinutes ?? 15;
+    const lowerBound = Math.min(min, max);
+    const upperBound = Math.max(min, max);
+    const minutes = Math.floor(Math.random() * (upperBound - lowerBound + 1)) + lowerBound;
+    const target = new Date(now.getTime() + minutes * 60_000);
+    const value = fmtTime.format(target);
+    usedValues["HEURE+ALEATOIRE"] = value;
+    return value;
+  });
 
   // Variables automatiques de date/heure (point 19)
   const autoValues: Record<string, string> = {

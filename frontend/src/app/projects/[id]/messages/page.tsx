@@ -24,6 +24,8 @@ export default function MessagesPage() {
   const [name, setName] = useState("");
   const [content, setContent] = useState("");
   const [imageUrl, setImageUrl] = useState("");
+  const [randomMinMinutes, setRandomMinMinutes] = useState("");
+  const [randomMaxMinutes, setRandomMaxMinutes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -44,8 +46,17 @@ export default function MessagesPage() {
     setCreating(true);
     setError(null);
     try {
-      await apiFetch(`/api/projects/${id}/messages`, { method: "POST", body: JSON.stringify({ name, originalContent: content, imageUrl: imageUrl || null }) });
-      setName(""); setContent(""); setImageUrl("");
+      await apiFetch(`/api/projects/${id}/messages`, {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          originalContent: content,
+          imageUrl: imageUrl || null,
+          randomMinMinutes: randomMinMinutes ? parseInt(randomMinMinutes, 10) : null,
+          randomMaxMinutes: randomMaxMinutes ? parseInt(randomMaxMinutes, 10) : null,
+        }),
+      });
+      setName(""); setContent(""); setImageUrl(""); setRandomMinMinutes(""); setRandomMaxMinutes("");
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Création impossible.");
@@ -88,6 +99,17 @@ export default function MessagesPage() {
             <label>Contenu (utilisez {"{VARIABLE}"} pour les variables modifiables)</label>
             <textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder={"Bonjour à tous !\n\nVoici le contenu de votre message.\n\nÀ bientôt."} required />
             <ImageUploadField projectId={id} value={imageUrl} onChange={setImageUrl} />
+
+            {content.includes("{HEURE+ALEATOIRE}") && (
+              <div className="card" style={{ marginTop: 12 }}>
+                <p className="muted">Le message contient {"{HEURE+ALEATOIRE}"} : un délai aléatoire (en minutes) est ajouté à l'heure actuelle à chaque publication.</p>
+                <label>Minutes minimum</label>
+                <input type="number" min={0} value={randomMinMinutes} onChange={(e) => setRandomMinMinutes(e.target.value)} placeholder="5" />
+                <label>Minutes maximum</label>
+                <input type="number" min={0} value={randomMaxMinutes} onChange={(e) => setRandomMaxMinutes(e.target.value)} placeholder="15" />
+              </div>
+            )}
+
             {error && <div className="error-box">{error}</div>}
             <div style={{ marginTop: 12 }}>
               <button type="submit" disabled={creating}>{creating ? "Création…" : "Créer le message"}</button>

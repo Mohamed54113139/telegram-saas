@@ -19,6 +19,8 @@ interface MessageTemplate {
   preserveEmojis: boolean;
   preservePunctuation: boolean;
   requiredElements: string[];
+  randomMinMinutes?: number | null;
+  randomMaxMinutes?: number | null;
   active: boolean;
 }
 
@@ -80,6 +82,8 @@ export default function MessageDetailPage() {
           preserveEmojis: msg.preserveEmojis,
           preservePunctuation: msg.preservePunctuation,
           requiredElements: requiredElementsText.split(",").map((s) => s.trim()).filter(Boolean),
+          randomMinMinutes: msg.randomMinMinutes ?? null,
+          randomMaxMinutes: msg.randomMaxMinutes ?? null,
         }),
       });
       setMsg(updated);
@@ -185,6 +189,28 @@ export default function MessageDetailPage() {
         <textarea value={msg.originalContent} onChange={(e) => setMsg({ ...msg, originalContent: e.target.value })} style={{ minHeight: 140 }} />
 
         <ImageUploadField projectId={id} value={msg.imageUrl ?? ""} onChange={(url) => setMsg({ ...msg, imageUrl: url })} />
+
+        {msg.originalContent.includes("{HEURE+ALEATOIRE}") && (
+          <div className="card" style={{ marginTop: 12 }}>
+            <p className="muted">Le message contient {"{HEURE+ALEATOIRE}"} : un délai aléatoire (en minutes) est ajouté à l'heure actuelle à chaque publication.</p>
+            <label>Minutes minimum</label>
+            <input
+              type="number"
+              min={0}
+              value={msg.randomMinMinutes ?? ""}
+              onChange={(e) => setMsg({ ...msg, randomMinMinutes: e.target.value ? parseInt(e.target.value, 10) : null })}
+              placeholder="5"
+            />
+            <label>Minutes maximum</label>
+            <input
+              type="number"
+              min={0}
+              value={msg.randomMaxMinutes ?? ""}
+              onChange={(e) => setMsg({ ...msg, randomMaxMinutes: e.target.value ? parseInt(e.target.value, 10) : null })}
+              placeholder="15"
+            />
+          </div>
+        )}
 
         <label className="row" style={{ marginTop: 16 }}>
           <input type="checkbox" checked={msg.autoEdit} onChange={(e) => setMsg({ ...msg, autoEdit: e.target.checked })} />

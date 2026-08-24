@@ -138,6 +138,11 @@ model MessageTemplate {
   customInstructions String?
   similarity       Int       @default(50)
 
+  // Bornes (en minutes) pour {HEURE+ALEATOIRE} : un délai aléatoire est tiré
+  // entre ces deux valeurs à chaque résolution du message (voir variableService).
+  randomMinMinutes Int?
+  randomMaxMinutes Int?
+
   preserveEmojis      Boolean @default(true)
   preservePunctuation Boolean @default(false)
   requiredElements    String[] @default([])
