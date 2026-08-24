@@ -15,11 +15,16 @@ function sanitizeFeedXml(raw: string): string {
   return raw.replace(RAW_AMPERSAND_PATTERN, "&amp;");
 }
 
+// Un User-Agent de navigateur évite les blocages 403 de certains sites qui
+// rejettent les requêtes sans en-tête ou avec un User-Agent générique de bot.
+const BROWSER_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
 // Récupère le flux en texte brut (plutôt que de laisser rss-parser faire sa
 // propre requête), nettoie le XML, puis le parse — appliqué à toutes les
 // sources pour se protéger de flux mal formés.
 async function fetchAndParseFeed(feedUrl: string) {
-  const res = await fetch(feedUrl);
+  const res = await fetch(feedUrl, { headers: { "User-Agent": BROWSER_USER_AGENT } });
   if (!res.ok) {
     throw new Error(`Impossible de récupérer le flux (HTTP ${res.status}).`);
   }
