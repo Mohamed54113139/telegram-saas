@@ -12,9 +12,7 @@ export async function resolveDigestVariable(projectId: string): Promise<string> 
     return "Aucune information trouvée aujourd'hui.";
   }
 
-  const formatted = items
-    .map((item) => `• ${item.title}${item.link ? `\n${item.link}` : ""}`)
-    .join("\n\n");
+  const formatted = items.map((item) => `• ${item.title}`).join("\n\n");
 
   await prisma.digestItem.updateMany({
     where: { id: { in: items.map((i) => i.id) } },

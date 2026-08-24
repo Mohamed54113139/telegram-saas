@@ -62,9 +62,10 @@ interface FootballArticleAnalysis {
 
 // Demande à l'IA si l'article concerne un ou plusieurs matchs de football se
 // jouant précisément aujourd'hui (dans le fuseau horaire du projet), et si
-// oui, produit un résumé structuré ("⚽ Équipe A vs Équipe B" + pronostic +
-// justification) sans jamais inventer de cote ou de statistique absente du
-// texte source. En cas de doute, l'article est rejeté plutôt que deviné.
+// oui, produit une ligne stricte par match ("[drapeau] Équipe A vs Équipe B :
+// résultat prédit"), sans justification, sans jamais inventer de cote ou de
+// statistique absente du texte source. En cas de doute, l'article est
+// rejeté plutôt que deviné.
 async function analyzeFootballArticle(articleText: string, timezone: string): Promise<FootballArticleAnalysis> {
   if (!aiClient) {
     return { hasMatchToday: false, summary: null };
@@ -87,10 +88,12 @@ Nous sommes aujourd'hui le ${todayLabel} (fuseau horaire du projet).
 RÈGLES ABSOLUES :
 1. Détermine si l'article concerne un ou plusieurs matchs de football ayant lieu PRÉCISÉMENT aujourd'hui. Si ce n'est pas identifiable avec certitude (date différente, date absente ou ambiguë, article pas centré sur un match précis), rejette : hasMatchToday=false, summary=null. En cas de doute, rejette plutôt que de deviner.
 2. N'invente JAMAIS de cote, statistique ou information qui n'est pas explicitement mentionnée dans le texte fourni.
-3. Si accepté, rédige un résumé en français, structuré ainsi pour CHAQUE match identifié, séparés par une ligne vide :
-⚽ Équipe A vs Équipe B
-<une ligne de pronostic : résultat ou marché parié>
-<une brève justification en une phrase>
+3. Si accepté, produis en français UNE SEULE LIGNE STRICTE par match identifié, SANS justification et sans aucun autre texte, au format exact :
+[drapeau emoji du pays de la compétition] Équipe A vs Équipe B : [résultat prédit]
+   - Résultat prédit : "Équipe A gagne", "Équipe B gagne", "Match nul", ou le marché parié tel que mentionné dans l'article (ex: "plus de 2.5 buts") si ce n'est pas un simple résultat de victoire/nul.
+   - Drapeau : celui du pays de la compétition/ligue mentionnée dans l'article (ex: 🏴󠁧󠁢󠁥󠁮󠁧󠁿 ou 🇬🇧 pour Premier League/Championship anglais, 🇪🇸 pour LaLiga, 🇮🇹 pour Serie A, 🇫🇷 pour Ligue 1, 🇩🇪 pour Bundesliga, 🇪🇺 pour Ligue des Champions/Europa League, etc.). Si le pays ou la compétition n'est pas identifiable avec certitude, OMETS le drapeau plutôt que d'en inventer un.
+   - Si plusieurs matchs, une ligne par match, séparées par un simple retour à la ligne (pas de ligne vide entre elles).
+   - Traduis en français même si l'article source est en anglais (garde les noms d'équipes tels quels).
 4. Réponds UNIQUEMENT avec un JSON valide de la forme : { "hasMatchToday": boolean, "summary": string | null }`;
 
   const response = await aiClient.chat.completions.create({
