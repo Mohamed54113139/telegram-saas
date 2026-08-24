@@ -13,7 +13,9 @@ export function resolveVariables(
   let resolved = content;
 
   const now = new Date();
-  const fmt = new Intl.DateTimeFormat("fr-FR", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" });
+  // Ex: "lundi 24 août 2026" — toujours en minuscules (Intl peut mettre une
+  // majuscule initiale au jour de la semaine selon l'environnement).
+  const fmtDate = new Intl.DateTimeFormat("fr-FR", { timeZone: timezone, weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const fmtTime = new Intl.DateTimeFormat("fr-FR", { timeZone: timezone, hour: "2-digit", minute: "2-digit" });
   const fmtDay = new Intl.DateTimeFormat("fr-FR", { timeZone: timezone, weekday: "long" });
 
@@ -38,7 +40,7 @@ export function resolveVariables(
 
   // Variables automatiques de date/heure (point 19)
   const autoValues: Record<string, string> = {
-    DATE: fmt.format(now),
+    DATE: fmtDate.format(now).toLowerCase(),
     HEURE: fmtTime.format(now),
     JOUR: fmtDay.format(now),
   };
