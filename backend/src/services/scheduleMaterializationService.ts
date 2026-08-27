@@ -51,28 +51,52 @@ export async function materializeSchedule(schedule: Schedule, project: Project, 
   }
 
   let created = 0;
+  let reactivated = 0;
   for (const occ of occurrences) {
     const idempotencyKey = `schedule:${schedule.id}:${occ.toISOString()}`;
-    const result = await prisma.scheduledPost.upsert({
-      where: { idempotencyKey },
-      update: {},
-      create: {
-        projectId: project.id,
-        messageTemplateId: schedule.messageTemplateId,
-        scheduleId: schedule.id,
-        idempotencyKey,
-        scheduledFor: occ,
-        status: "SCHEDULED",
-      },
+    const existing = await prisma.scheduledPost.findUnique({ where: { idempotencyKey } });
+
+    if (!existing) {
+      await prisma.scheduledPost.create({
+        data: {
+          projectId: project.id,
+          messageTemplateId: schedule.messageTemplateId,
+          scheduleId: schedule.id,
+          idempotencyKey,
+          scheduledFor: occ,
+          status: "SCHEDULED",
+        },
+      });
+      created++;
+      continue;
+    }
+
+    // Ne jamais retoucher une occurrence déjà traitée (publiée, en cours
+    // d'envoi, ou en échec définitif) — seule une occurrence annulée peut
+    // être remise en file par une nouvelle matérialisation.
+    if (existing.status !== "CANCELLED") continue;
+
+    // Remet en SCHEDULED, et réaligne sur le message actuellement associé au
+    // Schedule (le contenu réel n'est généré qu'au moment de l'envoi, à
+    // partir de messageTemplateId — donc un changement de message depuis
+    // l'édition du Schedule est bien pris en compte pour ce futur envoi).
+    await prisma.scheduledPost.update({
+      where: { id: existing.id },
+      data: { status: "SCHEDULED", messageTemplateId: schedule.messageTemplateId },
     });
-    if (result.createdAt.getTime() === result.updatedAt.getTime()) created++;
+    reactivated++;
   }
 
-  if (created > 0) {
-    await logEvent({ projectId: project.id, category: "scheduler", message: `${created} publication(s) planifiée(s) depuis la programmation.`, metadata: { scheduleId: schedule.id } });
+  if (created > 0 || reactivated > 0) {
+    await logEvent({
+      projectId: project.id,
+      category: "scheduler",
+      message: `${created} publication(s) planifiée(s) et ${reactivated} réactivée(s) depuis la programmation.`,
+      metadata: { scheduleId: schedule.id, created, reactivated },
+    });
   }
 
-  return created;
+  return created + reactivated;
 }
 
 // Matérialise toutes les programmations actives (appelé par le scheduler périodique)
