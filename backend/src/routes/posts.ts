@@ -72,4 +72,24 @@ router.post("/:projectId/posts/:postId/cancel", requireProjectOwnership, async (
   }
 });
 
+const bulkCancelSchema = z.object({
+  postIds: z.array(z.string().uuid()).min(1),
+});
+
+// Annulation groupée depuis le Planning (sélection multiple) — même contrainte
+// que l'annulation individuelle : seules les publications encore SCHEDULED
+// sont annulées, les autres ids fournis sont simplement ignorés.
+router.post("/:projectId/posts/bulk-cancel", requireProjectOwnership, async (req: AuthRequest & any, res, next) => {
+  try {
+    const { postIds } = bulkCancelSchema.parse(req.body);
+    const result = await prisma.scheduledPost.updateMany({
+      where: { id: { in: postIds }, projectId: req.project.id, status: "SCHEDULED" },
+      data: { status: "CANCELLED" },
+    });
+    res.json({ cancelled: result.count });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
