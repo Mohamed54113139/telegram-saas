@@ -52,24 +52,28 @@ async function processPost(postId: string) {
 
     if (post.messageTemplate.sourceChatId && post.messageTemplate.sourceMessageId) {
       if (!post.messageTemplate.originalContent) {
-        await copyTelegramMessage(botToken, post.messageTemplate.sourceChatId, channel.chatId, post.messageTemplate.sourceMessageId);
+        const result = await copyTelegramMessage(botToken, post.messageTemplate.sourceChatId, channel.chatId, post.messageTemplate.sourceMessageId);
 
+        // Écrit PUBLISHED + le message_id immédiatement après la réponse
+        // réussie de Telegram, pour réduire au minimum la fenêtre pendant
+        // laquelle un crash laisserait un envoi réel non enregistré en base.
         await prisma.scheduledPost.update({
           where: { id: post.id },
           data: {
             status: "PUBLISHED",
             publishedAt: new Date(),
             generatedContent: "[Publication copiée depuis Telegram]",
+            telegramMessageId: result.message_id,
             attempts: { increment: 1 },
           },
         });
 
-        await logEvent({ projectId: post.projectId, category: "publication", message: "Publication (copie) envoyée avec succès.", metadata: { postId: post.id } });
+        await logEvent({ projectId: post.projectId, category: "publication", message: "Publication (copie) envoyée avec succès.", metadata: { postId: post.id, telegramMessageId: result.message_id } });
         return;
       }
 
       const generated = await generateMessageContent(post.messageTemplate, post.project);
-      await copyTelegramMessage(botToken, post.messageTemplate.sourceChatId, channel.chatId, post.messageTemplate.sourceMessageId, generated.generatedContent);
+      const result = await copyTelegramMessage(botToken, post.messageTemplate.sourceChatId, channel.chatId, post.messageTemplate.sourceMessageId, generated.generatedContent);
 
       await prisma.scheduledPost.update({
         where: { id: post.id },
@@ -78,20 +82,19 @@ async function processPost(postId: string) {
           publishedAt: new Date(),
           generatedContent: generated.generatedContent,
           variablesUsed: generated.usedVariables as any,
+          telegramMessageId: result.message_id,
           attempts: { increment: 1 },
         },
       });
 
-      await logEvent({ projectId: post.projectId, category: "publication", message: "Publication (copie avec légende reformulée) envoyée avec succès.", metadata: { postId: post.id } });
+      await logEvent({ projectId: post.projectId, category: "publication", message: "Publication (copie avec légende reformulée) envoyée avec succès.", metadata: { postId: post.id, telegramMessageId: result.message_id } });
       return;
     }
 
     const generated = await generateMessageContent(post.messageTemplate, post.project);
-    if (post.messageTemplate.imageUrl) {
-      await sendTelegramPhoto(botToken, channel.chatId, post.messageTemplate.imageUrl, generated.generatedContent);
-    } else {
-      await sendTelegramMessage(botToken, channel.chatId, generated.generatedContent);
-    }
+    const result = post.messageTemplate.imageUrl
+      ? await sendTelegramPhoto(botToken, channel.chatId, post.messageTemplate.imageUrl, generated.generatedContent)
+      : await sendTelegramMessage(botToken, channel.chatId, generated.generatedContent);
 
     await prisma.scheduledPost.update({
       where: { id: post.id },
@@ -100,11 +103,12 @@ async function processPost(postId: string) {
         publishedAt: new Date(),
         generatedContent: generated.generatedContent,
         variablesUsed: generated.usedVariables as any,
+        telegramMessageId: result.message_id,
         attempts: { increment: 1 },
       },
     });
 
-    await logEvent({ projectId: post.projectId, category: "publication", message: "Publication envoyée avec succès.", metadata: { postId: post.id } });
+    await logEvent({ projectId: post.projectId, category: "publication", message: "Publication envoyée avec succès.", metadata: { postId: post.id, telegramMessageId: result.message_id } });
   } catch (err: any) {
     const attempts = post.attempts + 1;
     const shouldRetry = attempts < MAX_ATTEMPTS;
@@ -130,17 +134,34 @@ async function processPost(postId: string) {
 
 // Reprise après redémarrage du serveur (points 48-49) :
 // - les publications déjà PUBLISHED ne sont jamais rejouées (elles gardent leur statut)
-// - les publications restées bloquées en PROCESSING (ex: crash serveur en plein envoi)
-//   sont remises en file après un délai de sécurité, pour être retraitées
+// - les publications restées bloquées en PROCESSING (ex: crash serveur en plein envoi) ne
+//   sont PAS remises automatiquement en file : on ne peut pas savoir avec certitude si
+//   l'envoi Telegram a déjà eu lieu avant l'interruption (le message pourrait avoir été
+//   réellement délivré juste avant le crash, sans que le PUBLISHED correspondant ait pu
+//   être écrit en base). On les marque donc FAILED, pour vérification manuelle, plutôt
+//   que de risquer un double envoi automatique.
 async function recoverStuckPosts() {
   const threshold = new Date(Date.now() - STUCK_PROCESSING_MINUTES * 60_000);
-  const result = await prisma.scheduledPost.updateMany({
+  const stuck = await prisma.scheduledPost.findMany({
     where: { status: "PROCESSING", updatedAt: { lte: threshold } },
-    data: { status: "SCHEDULED" },
+    select: { id: true },
   });
-  if (result.count > 0) {
-    await logEvent({ category: "scheduler", message: `${result.count} publication(s) bloquée(s) remises en file après redémarrage.` });
-  }
+  if (stuck.length === 0) return;
+
+  await prisma.scheduledPost.updateMany({
+    where: { id: { in: stuck.map((p) => p.id) } },
+    data: {
+      status: "FAILED",
+      lastError: "Statut incertain après interruption (redémarrage/crash pendant l'envoi) : vérifier manuellement si le message a été publié.",
+    },
+  });
+
+  await logEvent({
+    level: "WARN",
+    category: "scheduler",
+    message: `${stuck.length} publication(s) bloquée(s) marquée(s) en échec pour vérification manuelle (statut incertain après interruption).`,
+    metadata: { postIds: stuck.map((p) => p.id) },
+  });
 }
 
 async function tick() {

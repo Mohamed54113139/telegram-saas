@@ -332,6 +332,11 @@ model ScheduledPost {
   attempts     Int        @default(0)
   lastError    String?
 
+  // message_id renvoyé par Telegram, enregistré immédiatement à la réponse
+  // réussie de l'API — permet de savoir avec certitude qu'un envoi a eu
+  // lieu même si le process est interrompu juste après (voir scheduler.ts).
+  telegramMessageId Int?
+
   isSimulation Boolean @default(false)
   feedback     FeedbackType?
 
