@@ -24,3 +24,14 @@ export function weekdayInTimezone(date: Date, timeZone: string): number {
   const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
   return map[fmt.format(date)];
 }
+
+// Renvoie le jour civil LOCAL (année/mois/jour tels que vus depuis ce fuseau) d'un
+// instant. Contrairement à date.getUTCFullYear()/getUTCMonth()/getUTCDate(), qui
+// renvoient le calendrier UTC, cette fonction renvoie le calendrier du fuseau donné —
+// les deux peuvent différer d'un jour autour de minuit local selon le décalage horaire.
+export function localDateParts(date: Date, timeZone: string): { year: number; month: number; day: number } {
+  const fmt = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+  const parts = fmt.formatToParts(date);
+  const get = (type: string) => parseInt(parts.find((p) => p.type === type)!.value, 10);
+  return { year: get("year"), month: get("month"), day: get("day") };
+}

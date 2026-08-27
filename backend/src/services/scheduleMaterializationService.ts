@@ -1,6 +1,6 @@
 import { Project, Schedule } from "@prisma/client";
 import { prisma } from "../config/prisma";
-import { zonedTimeToUtc, parseTime, weekdayInTimezone } from "../utils/timezone";
+import { zonedTimeToUtc, parseTime, weekdayInTimezone, localDateParts } from "../utils/timezone";
 import { logEvent } from "./logService";
 
 // "Matérialise" un Schedule en publications concrètes (ScheduledPost) pour une fenêtre de temps donnée.
@@ -31,15 +31,20 @@ export async function materializeSchedule(schedule: Schedule, project: Project, 
       if (utc >= effectiveStart && utc <= effectiveEnd) occurrences.push(utc);
     }
   } else {
-    // DAILY ou CUSTOM_DAYS : on itère jour par jour dans la fenêtre
+    // DAILY ou CUSTOM_DAYS : on itère jour par jour dans la fenêtre.
+    // Le jour de semaine ET le jour civil utilisé pour construire l'occurrence
+    // doivent tous les deux venir du calendrier LOCAL du projet (pas du
+    // calendrier UTC de l'instant `cursor`), sous peine de décalage d'un jour
+    // selon le fuseau (voir localDateParts).
     for (let cursor = new Date(effectiveStart); cursor <= effectiveEnd; cursor = new Date(cursor.getTime() + 24 * 60 * 60 * 1000)) {
       const dow = weekdayInTimezone(cursor, project.timezone);
       const applies = schedule.repeatMode === "DAILY" || schedule.daysOfWeek.includes(dow);
       if (!applies) continue;
 
+      const { year, month, day } = localDateParts(cursor, project.timezone);
       for (const t of schedule.times) {
         const { hour, minute } = parseTime(t);
-        const utc = zonedTimeToUtc(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, cursor.getUTCDate(), hour, minute, project.timezone);
+        const utc = zonedTimeToUtc(year, month, day, hour, minute, project.timezone);
         if (utc >= effectiveStart && utc <= effectiveEnd) occurrences.push(utc);
       }
     }
