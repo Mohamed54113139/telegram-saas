@@ -7,6 +7,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 interface MessageTemplate { id: string; name: string; sourceChatId?: string | null; }
 interface Schedule {
   id: string;
+  messageTemplateId: string;
   repeatMode: string;
   daysOfWeek: number[];
   times: string[];
@@ -26,6 +27,7 @@ export default function SchedulesPage() {
   const [times, setTimes] = useState<string[]>(["09:00"]);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   async function load() {
     const [s, t] = await Promise.all([
@@ -47,26 +49,53 @@ export default function SchedulesPage() {
   function addTime() { setTimes((prev) => [...prev, "12:00"]); }
   function removeTime(idx: number) { setTimes((prev) => prev.filter((_, i) => i !== idx)); }
 
-  async function handleCreate(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setCreating(true);
     setError(null);
+    const payload = {
+      messageTemplateId,
+      repeatMode,
+      daysOfWeek: repeatMode === "CUSTOM_DAYS" ? daysOfWeek : [],
+      times,
+    };
     try {
-      await apiFetch(`/api/projects/${id}/schedules`, {
-        method: "POST",
-        body: JSON.stringify({
-          messageTemplateId,
-          repeatMode,
-          daysOfWeek: repeatMode === "CUSTOM_DAYS" ? daysOfWeek : [],
-          times,
-        }),
-      });
+      if (editingId) {
+        await apiFetch(`/api/projects/${id}/schedules/${editingId}`, { method: "PATCH", body: JSON.stringify(payload) });
+        setEditingId(null);
+      } else {
+        await apiFetch(`/api/projects/${id}/schedules`, { method: "POST", body: JSON.stringify(payload) });
+      }
+      resetForm();
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Création impossible.");
+      setError(err instanceof ApiError ? err.message : "Enregistrement impossible.");
     } finally {
       setCreating(false);
     }
+  }
+
+  function resetForm() {
+    setRepeatMode("DAILY");
+    setDaysOfWeek([1, 2, 3, 4, 5]);
+    setTimes(["09:00"]);
+    if (templates.length > 0) setMessageTemplateId(templates[0].id);
+  }
+
+  function startEdit(s: Schedule) {
+    setEditingId(s.id);
+    setMessageTemplateId(s.messageTemplateId);
+    setRepeatMode(s.repeatMode === "CUSTOM_DAYS" ? "CUSTOM_DAYS" : "DAILY");
+    setDaysOfWeek(s.daysOfWeek.length > 0 ? s.daysOfWeek : [1, 2, 3, 4, 5]);
+    setTimes(s.times.length > 0 ? s.times : ["09:00"]);
+    setError(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    resetForm();
+    setError(null);
   }
 
   async function toggleActive(scheduleId: string) {
@@ -87,7 +116,8 @@ export default function SchedulesPage() {
       {templates.length === 0 ? (
         <p className="muted">Créez d'abord un message avant de le programmer.</p>
       ) : (
-        <form onSubmit={handleCreate} className="card">
+        <form onSubmit={handleSubmit} className="card">
+          {editingId && <h2>Modifier la programmation</h2>}
           <label>Message</label>
           <select value={messageTemplateId} onChange={(e) => setMessageTemplateId(e.target.value)}>
             {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.sourceChatId ? " (Copie)" : ""}</option>)}
@@ -121,8 +151,11 @@ export default function SchedulesPage() {
           </div>
 
           {error && <div className="error-box">{error}</div>}
-          <div style={{ marginTop: 14 }}>
-            <button type="submit" disabled={creating}>{creating ? "Création…" : "Programmer"}</button>
+          <div className="row" style={{ marginTop: 14 }}>
+            <button type="submit" disabled={creating}>
+              {creating ? "Enregistrement…" : editingId ? "Enregistrer les modifications" : "Programmer"}
+            </button>
+            {editingId && <button type="button" className="secondary" onClick={cancelEdit}>Annuler</button>}
           </div>
         </form>
       )}
@@ -138,6 +171,7 @@ export default function SchedulesPage() {
               {s.repeatMode === "DAILY" ? "Tous les jours" : s.daysOfWeek.map((d) => DAYS[d]).join(", ")} · {s.times.join(", ")}
             </p>
             <div className="row">
+              <button className="secondary" onClick={() => startEdit(s)}>Modifier</button>
               <button className="secondary" onClick={() => toggleActive(s.id)}>{s.active ? "Désactiver" : "Activer"}</button>
               <button className="danger" onClick={() => remove(s.id)}>Supprimer</button>
             </div>
