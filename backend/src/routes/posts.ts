@@ -92,4 +92,42 @@ router.post("/:projectId/posts/bulk-cancel", requireProjectOwnership, async (req
   }
 });
 
+// Suppression définitive d'une publication annulée. Restreint à CANCELLED :
+// une publication active (SCHEDULED), en cours d'envoi (PROCESSING) ou déjà
+// envoyée (PUBLISHED)/échouée (FAILED) ne doit jamais pouvoir être supprimée
+// par erreur — seule une annulation explicite permet de la rendre supprimable.
+router.delete("/:projectId/posts/:postId", requireProjectOwnership, async (req: AuthRequest & any, res, next) => {
+  try {
+    const post = await prisma.scheduledPost.findFirst({ where: { id: req.params.postId, projectId: req.project.id } });
+    if (!post) return res.status(404).json({ error: "Publication introuvable." });
+    if (post.status !== "CANCELLED") {
+      return res.status(400).json({ error: "Seule une publication annulée peut être supprimée définitivement." });
+    }
+    await prisma.scheduledPost.delete({ where: { id: post.id } });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const bulkDeleteSchema = z.object({
+  postIds: z.array(z.string().uuid()).min(1),
+});
+
+// Suppression groupée depuis le Planning — même contrainte que la suppression
+// individuelle : le filtre status: "CANCELLED" est appliqué directement dans
+// la requête, donc tout id fourni qui ne serait pas CANCELLED est simplement
+// ignoré plutôt que supprimé.
+router.post("/:projectId/posts/bulk-delete", requireProjectOwnership, async (req: AuthRequest & any, res, next) => {
+  try {
+    const { postIds } = bulkDeleteSchema.parse(req.body);
+    const result = await prisma.scheduledPost.deleteMany({
+      where: { id: { in: postIds }, projectId: req.project.id, status: "CANCELLED" },
+    });
+    res.json({ deleted: result.count });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
