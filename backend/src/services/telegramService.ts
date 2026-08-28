@@ -24,6 +24,26 @@ async function callTelegram<T>(botToken: string, method: string, body?: Record<s
   return data.result as T;
 }
 
+function isParseEntitiesError(err: unknown): boolean {
+  const message = err instanceof HttpError ? err.publicMessage : err instanceof Error ? err.message : "";
+  return /can't parse entities/i.test(message);
+}
+
+// Enveloppe callTelegram pour les appels avec parse_mode : si Telegram rejette
+// le texte à cause d'un caractère de formatage isolé/mal fermé, on retente
+// une fois sans parse_mode plutôt que de bloquer complètement l'envoi.
+async function callTelegramWithParseModeFallback<T>(botToken: string, method: string, body: Record<string, unknown>): Promise<T> {
+  try {
+    return await callTelegram<T>(botToken, method, body);
+  } catch (err) {
+    if (body.parse_mode && isParseEntitiesError(err)) {
+      const { parse_mode, ...withoutParseMode } = body;
+      return await callTelegram<T>(botToken, method, withoutParseMode);
+    }
+    throw err;
+  }
+}
+
 export interface TelegramMe {
   id: number;
   is_bot: boolean;
@@ -67,7 +87,7 @@ export async function verifyBotIsAdmin(botToken: string, chatId: string, botUser
 
 // Envoie un message texte sur le canal
 export async function sendTelegramMessage(botToken: string, chatId: string, text: string): Promise<{ message_id: number }> {
-  return callTelegram<{ message_id: number }>(botToken, "sendMessage", {
+  return callTelegramWithParseModeFallback<{ message_id: number }>(botToken, "sendMessage", {
     chat_id: chatId,
     text,
     parse_mode: "HTML",
@@ -87,7 +107,7 @@ export async function sendTelegramPhoto(
   const trimmedCaption = caption && caption.length > 1024
     ? caption.slice(0, 1021) + "..."
     : caption;
-  return callTelegram<{ message_id: number }>(botToken, "sendPhoto", {
+  return callTelegramWithParseModeFallback<{ message_id: number }>(botToken, "sendPhoto", {
     chat_id: chatId,
     photo: photoUrl,
     caption: trimmedCaption,
@@ -106,7 +126,7 @@ export async function copyTelegramMessage(
   const trimmedCaption = caption && caption.length > 1024
     ? caption.slice(0, 1021) + "..."
     : caption;
-  return callTelegram<{ message_id: number }>(botToken, "copyMessage", {
+  return callTelegramWithParseModeFallback<{ message_id: number }>(botToken, "copyMessage", {
     chat_id: toChatId,
     from_chat_id: fromChatId,
     message_id: messageId,
