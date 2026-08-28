@@ -12,9 +12,13 @@ interface SessionItem {
   durationMin: number;
   intervalMin: number;
   active: boolean;
+  recurring: boolean;
+  daysOfWeek: number[];
   messageTemplate: { name: string };
 }
 interface CalcResult { startTime: string; endTime: string; totalPosts: number; occurrences: string[]; }
+
+const DAYS = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
 
 function toLocalInputValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -30,6 +34,9 @@ export default function SessionsPage() {
   const [startTime, setStartTime] = useState(toLocalInputValue(new Date(Date.now() + 3600_000)));
   const [durationMin, setDurationMin] = useState(60);
   const [intervalMin, setIntervalMin] = useState(10);
+  const [recurring, setRecurring] = useState(false);
+  const [daysOfWeek, setDaysOfWeek] = useState<number[]>([1, 2, 3, 4, 5]);
+  const [timeOfDay, setTimeOfDay] = useState("14:00");
   const [calc, setCalc] = useState<CalcResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -45,12 +52,25 @@ export default function SessionsPage() {
   }
   useEffect(() => { load(); }, [id]);
 
+  function toggleDay(d: number) {
+    setDaysOfWeek((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()));
+  }
+
+  // En mode récurrent, seule l'heure de la journée compte (appliquée chaque
+  // jour sélectionné côté serveur) — on combine avec la date du jour
+  // uniquement pour respecter le format attendu par l'aperçu/la création.
+  function effectiveStartTimeString() {
+    if (!recurring) return startTime;
+    const todayStr = toLocalInputValue(new Date()).slice(0, 10);
+    return `${todayStr}T${timeOfDay}`;
+  }
+
   async function handlePreview() {
     setError(null);
     try {
       const result = await apiFetch<CalcResult>(`/api/projects/${id}/sessions/preview`, {
         method: "POST",
-        body: JSON.stringify({ startTime: new Date(startTime).toISOString(), durationMin, intervalMin }),
+        body: JSON.stringify({ startTime: new Date(effectiveStartTimeString()).toISOString(), durationMin, intervalMin }),
       });
       setCalc(result);
     } catch (err) {
@@ -58,7 +78,7 @@ export default function SessionsPage() {
     }
   }
 
-  useEffect(() => { handlePreview(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [startTime, durationMin, intervalMin]);
+  useEffect(() => { handlePreview(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [startTime, timeOfDay, recurring, durationMin, intervalMin]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -67,7 +87,15 @@ export default function SessionsPage() {
     try {
       await apiFetch(`/api/projects/${id}/sessions`, {
         method: "POST",
-        body: JSON.stringify({ name, messageTemplateId, startTime: new Date(startTime).toISOString(), durationMin, intervalMin }),
+        body: JSON.stringify({
+          name,
+          messageTemplateId,
+          startTime: new Date(effectiveStartTimeString()).toISOString(),
+          durationMin,
+          intervalMin,
+          recurring,
+          daysOfWeek: recurring ? daysOfWeek : [],
+        }),
       });
       await load();
     } catch (err) {
@@ -104,11 +132,36 @@ export default function SessionsPage() {
             {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.sourceChatId ? " (Copie)" : ""}</option>)}
           </select>
 
-          <div className="row">
-            <div style={{ flex: 1, minWidth: 200 }}>
+          <label className="row" style={{ marginTop: 12 }}>
+            <input type="checkbox" checked={recurring} onChange={(e) => setRecurring(e.target.checked)} />
+            Répéter chaque semaine
+          </label>
+
+          {recurring ? (
+            <div className="row" style={{ marginTop: 8 }}>
+              <div style={{ width: 160 }}>
+                <label>Heure de début</label>
+                <input type="time" value={timeOfDay} onChange={(e) => setTimeOfDay(e.target.value)} required />
+              </div>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <label>Jours</label>
+                <div className="row" style={{ marginTop: 0 }}>
+                  {DAYS.map((d, idx) => (
+                    <label key={idx} className="row" style={{ marginTop: 0 }}>
+                      <input type="checkbox" checked={daysOfWeek.includes(idx)} onChange={() => toggleDay(idx)} /> {d}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginTop: 8 }}>
               <label>Début</label>
               <input type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} required />
             </div>
+          )}
+
+          <div className="row">
             <div style={{ width: 160 }}>
               <label>Durée (minutes)</label>
               <input type="number" min={1} value={durationMin} onChange={(e) => setDurationMin(parseInt(e.target.value) || 0)} required />
@@ -121,13 +174,15 @@ export default function SessionsPage() {
 
           {calc && (
             <div className="success-box">
-              <strong>{calc.totalPosts} publication(s)</strong> — de {new Date(calc.startTime).toLocaleTimeString("fr-FR")} à {new Date(calc.endTime).toLocaleTimeString("fr-FR")} ({new Date(calc.startTime).toLocaleDateString("fr-FR")})
+              <strong>{calc.totalPosts} publication(s)</strong> {recurring ? "par jour sélectionné" : ""} — de {new Date(calc.startTime).toLocaleTimeString("fr-FR")} à {new Date(calc.endTime).toLocaleTimeString("fr-FR")}
+              {!recurring && ` (${new Date(calc.startTime).toLocaleDateString("fr-FR")})`}
             </div>
           )}
+          {recurring && daysOfWeek.length === 0 && <div className="error-box">Sélectionnez au moins un jour.</div>}
           {error && <div className="error-box">{error}</div>}
 
           <div style={{ marginTop: 10 }}>
-            <button type="submit" disabled={creating}>{creating ? "Création…" : "Créer la session"}</button>
+            <button type="submit" disabled={creating || (recurring && daysOfWeek.length === 0)}>{creating ? "Création…" : "Créer la session"}</button>
           </div>
         </form>
       )}
@@ -139,7 +194,13 @@ export default function SessionsPage() {
               <strong>{s.name}</strong>
               <span className={`badge ${s.active ? "ok" : "muted"}`}>{s.active ? "Active" : "Inactive"}</span>
             </div>
-            <p className="muted">{s.messageTemplate.name} · {new Date(s.startTime).toLocaleString("fr-FR")} · {s.durationMin} min · intervalle {s.intervalMin} min</p>
+            <p className="muted">
+              {s.messageTemplate.name} ·{" "}
+              {s.recurring
+                ? `Chaque ${s.daysOfWeek.map((d) => DAYS[d]).join(", ")} à ${new Date(s.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`
+                : new Date(s.startTime).toLocaleString("fr-FR")}
+              {" "}· {s.durationMin} min · intervalle {s.intervalMin} min
+            </p>
             <div className="row">
               <button className="secondary" onClick={() => toggleActive(s.id)}>{s.active ? "Désactiver" : "Activer"}</button>
               <button className="danger" onClick={() => remove(s.id)}>Supprimer</button>

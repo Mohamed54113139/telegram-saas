@@ -1,7 +1,50 @@
-import { Project, Schedule } from "@prisma/client";
+import { Project, Schedule, Session } from "@prisma/client";
 import { prisma } from "../config/prisma";
-import { zonedTimeToUtc, parseTime, weekdayInTimezone, localDateParts } from "../utils/timezone";
+import { zonedTimeToUtc, parseTime, weekdayInTimezone, localDateParts, localTimeParts } from "../utils/timezone";
+import { calculateSessionOccurrences } from "./sessionCalcService";
 import { logEvent } from "./logService";
+
+type UpsertOutcome = "created" | "reactivated" | "skipped";
+
+// Crée l'occurrence si elle n'existe pas encore (clé d'idempotence), la
+// réactive si elle avait été annulée (CANCELLED -> SCHEDULED, en réalignant
+// messageTemplateId au cas où il aurait changé depuis), et ne touche jamais
+// une occurrence déjà traitée (PUBLISHED/PROCESSING/FAILED). Logique partagée
+// entre la matérialisation des Schedule et celle des Session récurrentes.
+async function upsertScheduledOccurrence(params: {
+  idempotencyKey: string;
+  projectId: string;
+  messageTemplateId: string;
+  scheduledFor: Date;
+  scheduleId?: string;
+  sessionId?: string;
+}): Promise<UpsertOutcome> {
+  const { idempotencyKey, projectId, messageTemplateId, scheduledFor, scheduleId, sessionId } = params;
+  const existing = await prisma.scheduledPost.findUnique({ where: { idempotencyKey } });
+
+  if (!existing) {
+    await prisma.scheduledPost.create({
+      data: {
+        projectId,
+        messageTemplateId,
+        scheduleId,
+        sessionId,
+        idempotencyKey,
+        scheduledFor,
+        status: "SCHEDULED",
+      },
+    });
+    return "created";
+  }
+
+  if (existing.status !== "CANCELLED") return "skipped";
+
+  await prisma.scheduledPost.update({
+    where: { id: existing.id },
+    data: { status: "SCHEDULED", messageTemplateId },
+  });
+  return "reactivated";
+}
 
 // "Matérialise" un Schedule en publications concrètes (ScheduledPost) pour une fenêtre de temps donnée.
 // Peut être appelé plusieurs fois sans jamais créer de doublons grâce à une clé d'idempotence déterministe (Règle 8).
@@ -53,38 +96,15 @@ export async function materializeSchedule(schedule: Schedule, project: Project, 
   let created = 0;
   let reactivated = 0;
   for (const occ of occurrences) {
-    const idempotencyKey = `schedule:${schedule.id}:${occ.toISOString()}`;
-    const existing = await prisma.scheduledPost.findUnique({ where: { idempotencyKey } });
-
-    if (!existing) {
-      await prisma.scheduledPost.create({
-        data: {
-          projectId: project.id,
-          messageTemplateId: schedule.messageTemplateId,
-          scheduleId: schedule.id,
-          idempotencyKey,
-          scheduledFor: occ,
-          status: "SCHEDULED",
-        },
-      });
-      created++;
-      continue;
-    }
-
-    // Ne jamais retoucher une occurrence déjà traitée (publiée, en cours
-    // d'envoi, ou en échec définitif) — seule une occurrence annulée peut
-    // être remise en file par une nouvelle matérialisation.
-    if (existing.status !== "CANCELLED") continue;
-
-    // Remet en SCHEDULED, et réaligne sur le message actuellement associé au
-    // Schedule (le contenu réel n'est généré qu'au moment de l'envoi, à
-    // partir de messageTemplateId — donc un changement de message depuis
-    // l'édition du Schedule est bien pris en compte pour ce futur envoi).
-    await prisma.scheduledPost.update({
-      where: { id: existing.id },
-      data: { status: "SCHEDULED", messageTemplateId: schedule.messageTemplateId },
+    const outcome = await upsertScheduledOccurrence({
+      idempotencyKey: `schedule:${schedule.id}:${occ.toISOString()}`,
+      projectId: project.id,
+      messageTemplateId: schedule.messageTemplateId,
+      scheduledFor: occ,
+      scheduleId: schedule.id,
     });
-    reactivated++;
+    if (outcome === "created") created++;
+    else if (outcome === "reactivated") reactivated++;
   }
 
   if (created > 0 || reactivated > 0) {
@@ -107,6 +127,94 @@ export async function materializeAllActiveSchedules(): Promise<void> {
       await materializeSchedule(schedule, schedule.project);
     } catch (e: any) {
       await logEvent({ projectId: schedule.projectId, level: "ERROR", category: "scheduler", message: "Échec de matérialisation d'une programmation.", metadata: { error: e?.message } });
+    }
+  }
+}
+
+// "Matérialise" une Session récurrente : pour chaque jour sélectionné dans la
+// fenêtre à venir, régénère le même calcul d'occurrences (calculateSessionOccurrences)
+// qu'une session ponctuelle, à partir de l'heure locale (fuseau du projet) de
+// session.startTime — même mécanisme et même correctif de fuseau horaire que
+// materializeSchedule (jour civil ET heure toujours dérivés du calendrier
+// local du projet, jamais du calendrier UTC brut de l'instant).
+export async function materializeSession(session: Session, project: Project, windowDays = 14): Promise<number> {
+  if (!session.active || !session.recurring || session.daysOfWeek.length === 0) return 0;
+
+  const now = new Date();
+  const windowEnd = new Date(now.getTime() + windowDays * 24 * 60 * 60 * 1000);
+  const { hour, minute } = localTimeParts(session.startTime, project.timezone);
+
+  let created = 0;
+  let reactivated = 0;
+
+  for (let cursor = new Date(now); cursor <= windowEnd; cursor = new Date(cursor.getTime() + 24 * 60 * 60 * 1000)) {
+    const dow = weekdayInTimezone(cursor, project.timezone);
+    if (!session.daysOfWeek.includes(dow)) continue;
+
+    const { year, month, day } = localDateParts(cursor, project.timezone);
+    const dayStart = zonedTimeToUtc(year, month, day, hour, minute, project.timezone);
+    if (dayStart < now) continue; // créneau du jour déjà passé : pas de régénération rétroactive
+
+    const calc = calculateSessionOccurrences({ startTime: dayStart, durationMin: session.durationMin, intervalMin: session.intervalMin });
+
+    for (const occ of calc.occurrences) {
+      const outcome = await upsertScheduledOccurrence({
+        idempotencyKey: `session:${session.id}:${occ.toISOString()}`,
+        projectId: project.id,
+        messageTemplateId: session.messageTemplateId,
+        scheduledFor: occ,
+        sessionId: session.id,
+      });
+      if (outcome === "created") created++;
+      else if (outcome === "reactivated") reactivated++;
+    }
+
+    if (session.beforeMessageTemplateId && session.beforeMinutesOffset) {
+      const beforeTime = new Date(dayStart.getTime() - session.beforeMinutesOffset * 60_000);
+      const outcome = await upsertScheduledOccurrence({
+        idempotencyKey: `session:${session.id}:before:${dayStart.toISOString()}`,
+        projectId: project.id,
+        messageTemplateId: session.beforeMessageTemplateId,
+        scheduledFor: beforeTime,
+        sessionId: session.id,
+      });
+      if (outcome === "created") created++;
+      else if (outcome === "reactivated") reactivated++;
+    }
+
+    if (session.afterMessageTemplateId) {
+      const outcome = await upsertScheduledOccurrence({
+        idempotencyKey: `session:${session.id}:after:${dayStart.toISOString()}`,
+        projectId: project.id,
+        messageTemplateId: session.afterMessageTemplateId,
+        scheduledFor: calc.endTime,
+        sessionId: session.id,
+      });
+      if (outcome === "created") created++;
+      else if (outcome === "reactivated") reactivated++;
+    }
+  }
+
+  if (created > 0 || reactivated > 0) {
+    await logEvent({
+      projectId: project.id,
+      category: "scheduler",
+      message: `${created} publication(s) planifiée(s) et ${reactivated} réactivée(s) depuis la session récurrente "${session.name}".`,
+      metadata: { sessionId: session.id, created, reactivated },
+    });
+  }
+
+  return created + reactivated;
+}
+
+// Matérialise toutes les sessions récurrentes actives (appelé par le scheduler périodique)
+export async function materializeAllActiveRecurringSessions(): Promise<void> {
+  const sessions = await prisma.session.findMany({ where: { active: true, recurring: true }, include: { project: true } });
+  for (const session of sessions) {
+    try {
+      await materializeSession(session, session.project);
+    } catch (e: any) {
+      await logEvent({ projectId: session.projectId, level: "ERROR", category: "scheduler", message: "Échec de matérialisation d'une session récurrente.", metadata: { error: e?.message, sessionId: session.id } });
     }
   }
 }

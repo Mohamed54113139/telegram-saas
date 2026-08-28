@@ -4,6 +4,7 @@ import { prisma } from "../config/prisma";
 import { requireAuth, AuthRequest } from "../middleware/auth";
 import { requireProjectOwnership } from "../middleware/projectAccess";
 import { calculateSessionOccurrences } from "../services/sessionCalcService";
+import { materializeSession } from "../services/scheduleMaterializationService";
 import { logEvent } from "../services/logService";
 
 const router = Router({ mergeParams: true });
@@ -12,12 +13,16 @@ router.use(requireAuth);
 const sessionSchema = z.object({
   name: z.string().min(1),
   messageTemplateId: z.string().uuid(),
+  // Ponctuelle : date+heure exacte. Récurrente : seule l'heure est utilisée
+  // (voir materializeSession), la composante date de startTime est ignorée.
   startTime: z.coerce.date(),
   durationMin: z.number().int().positive(),
   intervalMin: z.number().int().positive(),
   beforeMessageTemplateId: z.string().uuid().nullable().optional(),
   beforeMinutesOffset: z.number().int().positive().nullable().optional(),
   afterMessageTemplateId: z.string().uuid().nullable().optional(),
+  recurring: z.boolean().default(false),
+  daysOfWeek: z.array(z.number().min(0).max(6)).default([]),
 });
 
 // Aperçu / calcul automatique AVANT création (points 38-39) — aucune écriture en base
@@ -50,6 +55,22 @@ router.post("/:projectId/sessions", requireProjectOwnership, async (req: AuthReq
     const data = sessionSchema.parse(req.body);
     const template = await prisma.messageTemplate.findFirst({ where: { id: data.messageTemplateId, projectId: req.project.id } });
     if (!template) return res.status(400).json({ error: "Message modèle invalide pour ce projet." });
+
+    if (data.recurring) {
+      if (data.daysOfWeek.length === 0) {
+        return res.status(400).json({ error: "Sélectionnez au moins un jour pour une session récurrente." });
+      }
+      const session = await prisma.session.create({ data: { projectId: req.project.id, ...data } });
+
+      // Matérialise immédiatement les prochaines occurrences sur la fenêtre à
+      // venir (même mécanisme que les Schedule récurrents) — les suivantes
+      // seront régénérées automatiquement par le cycle périodique du scheduler.
+      const postsCreated = await materializeSession(session, req.project);
+
+      await logEvent({ projectId: req.project.id, category: "session", message: `Session récurrente "${session.name}" créée (${postsCreated} publication(s) matérialisée(s) pour l'instant).` });
+
+      return res.status(201).json({ session, postsCreated });
+    }
 
     const calc = calculateSessionOccurrences(data);
 

@@ -35,3 +35,14 @@ export function localDateParts(date: Date, timeZone: string): { year: number; mo
   const get = (type: string) => parseInt(parts.find((p) => p.type === type)!.value, 10);
   return { year: get("year"), month: get("month"), day: get("day") };
 }
+
+// Renvoie l'heure LOCALE (dans le fuseau donné) d'un instant — pendant utile
+// pour extraire "l'heure de la journée" d'un Session.startTime récurrent,
+// indépendamment de sa composante date (voir materializeSession).
+export function localTimeParts(date: Date, timeZone: string): { hour: number; minute: number } {
+  const fmt = new Intl.DateTimeFormat("en-US", { timeZone, hour: "2-digit", minute: "2-digit", hour12: false });
+  const parts = fmt.formatToParts(date);
+  const get = (type: string) => parseInt(parts.find((p) => p.type === type)!.value, 10);
+  const hour = get("hour");
+  return { hour: hour === 24 ? 0 : hour, minute: get("minute") };
+}

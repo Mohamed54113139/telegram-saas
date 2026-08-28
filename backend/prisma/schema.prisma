@@ -268,9 +268,20 @@ model Session {
   messageTemplateId String
   messageTemplate   MessageTemplate @relation(fields: [messageTemplateId], references: [id], onDelete: Cascade)
 
-  startTime   DateTime // date+heure de début (UTC, calculée depuis le fuseau du projet)
+  // Ponctuelle (recurring=false) : date+heure de début exacte (UTC, calculée
+  // depuis le fuseau du projet). Récurrente (recurring=true) : seule l'heure
+  // locale (fuseau du projet) de startTime est utilisée, appliquée chaque
+  // jour sélectionné dans daysOfWeek — sa composante date n'a alors pas de
+  // sens propre (voir materializeSession dans scheduleMaterializationService.ts).
+  startTime   DateTime
   durationMin Int      // durée totale en minutes
   intervalMin Int      // intervalle entre publications en minutes
+
+  // Récurrence hebdomadaire, sur le même principe que Schedule.daysOfWeek.
+  // Prisma n'autorise pas un champ liste nullable : un tableau vide vaut
+  // "aucun jour choisi" (équivalent de "nullable" en pratique).
+  recurring  Boolean @default(false)
+  daysOfWeek Int[]   @default([])
 
   // Message avant / après session (optionnels)
   beforeMessageTemplateId String?
