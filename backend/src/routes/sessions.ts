@@ -150,6 +150,16 @@ router.delete("/:projectId/sessions/:id", requireProjectOwnership, async (req: A
   try {
     const existing = await prisma.session.findFirst({ where: { id: req.params.id, projectId: req.project.id } });
     if (!existing) return res.status(404).json({ error: "Session introuvable." });
+
+    // Annule les publications pas encore envoyées avant de supprimer la
+    // session — sinon sessionId est mis à NULL par la BDD (onDelete: SetNull)
+    // mais le statut SCHEDULED reste tel quel, et le scheduler les enverrait
+    // quand même malgré la suppression de la session.
+    await prisma.scheduledPost.updateMany({
+      where: { sessionId: existing.id, status: "SCHEDULED" },
+      data: { status: "CANCELLED" },
+    });
+
     await prisma.session.delete({ where: { id: existing.id } });
     res.json({ success: true });
   } catch (err) {

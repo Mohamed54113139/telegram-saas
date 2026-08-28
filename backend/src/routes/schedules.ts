@@ -72,6 +72,16 @@ router.post("/:projectId/schedules/:id/toggle", requireProjectOwnership, async (
     if (!existing) return res.status(404).json({ error: "Programmation introuvable." });
     // Désactiver ne supprime pas l'historique (point 45)
     const schedule = await prisma.schedule.update({ where: { id: existing.id }, data: { active: !existing.active } });
+
+    // À la désactivation, annule les publications pas encore envoyées (même
+    // comportement que le toggle de Session).
+    if (!schedule.active) {
+      await prisma.scheduledPost.updateMany({
+        where: { scheduleId: schedule.id, status: "SCHEDULED", scheduledFor: { gte: new Date() } },
+        data: { status: "CANCELLED" },
+      });
+    }
+
     res.json(schedule);
   } catch (err) {
     next(err);
@@ -82,6 +92,16 @@ router.delete("/:projectId/schedules/:id", requireProjectOwnership, async (req: 
   try {
     const existing = await prisma.schedule.findFirst({ where: { id: req.params.id, projectId: req.project.id } });
     if (!existing) return res.status(404).json({ error: "Programmation introuvable." });
+
+    // Annule les publications pas encore envoyées avant de supprimer la
+    // programmation — sinon scheduleId est mis à NULL par la BDD
+    // (onDelete: SetNull) mais le statut SCHEDULED reste tel quel, et le
+    // scheduler les enverrait quand même malgré la suppression.
+    await prisma.scheduledPost.updateMany({
+      where: { scheduleId: existing.id, status: "SCHEDULED" },
+      data: { status: "CANCELLED" },
+    });
+
     await prisma.schedule.delete({ where: { id: existing.id } });
     res.json({ success: true });
   } catch (err) {
