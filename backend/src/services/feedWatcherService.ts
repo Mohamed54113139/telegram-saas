@@ -115,7 +115,11 @@ RÈGLES ABSOLUES :
 }
 
 // Filtre par mots-clés football : un article n'est retenu que si son titre
-// contient au moins un de ces mots (insensible à la casse).
+// contient au moins un de ces mots (insensible à la casse). Réservé au
+// projet "Mhd pcs" (pronostics football) — voir FOOTBALL_PROJECT_ID plus bas.
+// Identifié par ID plutôt que par nom : le nom d'un projet est modifiable
+// depuis Paramètres, un ID ne change jamais.
+const FOOTBALL_PROJECT_ID = "6a206a35-8f0e-465f-aa9f-364f1941227c";
 const FOOTBALL_KEYWORDS = ["football", "foot", "match", "pronostic", "predictions", "tips", "betting"];
 
 function matchesFootballKeywords(title: string): boolean {
@@ -159,7 +163,7 @@ export async function checkSource(source: ContentSource): Promise<void> {
       await prisma.contentSourceItem.create({ data: { contentSourceId: source.id, guid } });
 
       const title = item.title ?? "Sans titre";
-      if (!matchesFootballKeywords(title)) continue;
+      if (source.projectId === FOOTBALL_PROJECT_ID && !matchesFootballKeywords(title)) continue;
 
       const link = item.link ?? null;
       const summary = item.contentSnippet ?? item.content ?? null;
