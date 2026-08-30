@@ -95,27 +95,52 @@ export async function sendTelegramMessage(botToken: string, chatId: string, text
   });
 }
 
-// Envoie une photo (via URL) avec légende sur le canal
+const PHOTO_CAPTION_LIMIT = 1024;
+const SHORT_CAPTION_LENGTH = 100;
+
+// Raccourcit un texte trop long pour une légende de photo, pour servir de
+// teaser — le texte complet est de toute façon envoyé juste après en message
+// séparé (voir sendTelegramPhoto / copyTelegramMessage).
+function shortenCaption(caption: string): string {
+  return caption.slice(0, SHORT_CAPTION_LENGTH) + "…";
+}
+
+// Envoie une photo (via URL) avec légende sur le canal. La légende d'une
+// photo Telegram est limitée à 1024 caractères (contre 4096 pour un message
+// texte) : si le texte tient dedans, un seul message photo+légende est
+// envoyé comme avant. S'il dépasse, la photo part avec une légende courte,
+// immédiatement suivie d'un message texte séparé contenant le contenu
+// complet — plutôt que de tronquer silencieusement le texte.
 export async function sendTelegramPhoto(
   botToken: string,
   chatId: string,
   photoUrl: string,
   caption?: string
 ): Promise<{ message_id: number }> {
-  // La légende d'une photo Telegram est limitée à 1024 caractères (contre
-  // 4096 pour un message texte), on tronque proprement si besoin
-  const trimmedCaption = caption && caption.length > 1024
-    ? caption.slice(0, 1021) + "..."
-    : caption;
-  return callTelegramWithParseModeFallback<{ message_id: number }>(botToken, "sendPhoto", {
+  if (!caption || caption.length <= PHOTO_CAPTION_LIMIT) {
+    return callTelegramWithParseModeFallback<{ message_id: number }>(botToken, "sendPhoto", {
+      chat_id: chatId,
+      photo: photoUrl,
+      caption,
+      parse_mode: "HTML",
+    });
+  }
+
+  const photoResult = await callTelegramWithParseModeFallback<{ message_id: number }>(botToken, "sendPhoto", {
     chat_id: chatId,
     photo: photoUrl,
-    caption: trimmedCaption,
+    caption: shortenCaption(caption),
     parse_mode: "HTML",
   });
+
+  await sendTelegramMessage(botToken, chatId, caption);
+
+  return photoResult;
 }
 
-// Copie une publication existante (par son lien) vers le canal cible
+// Copie une publication existante (par son lien) vers le canal cible. Même
+// traitement que sendTelegramPhoto pour la légende (voir ci-dessus) lorsque
+// la légende de remplacement dépasse la limite de 1024 caractères.
 export async function copyTelegramMessage(
   botToken: string,
   fromChatId: string,
@@ -123,13 +148,24 @@ export async function copyTelegramMessage(
   messageId: number,
   caption?: string
 ): Promise<{ message_id: number }> {
-  const trimmedCaption = caption && caption.length > 1024
-    ? caption.slice(0, 1021) + "..."
-    : caption;
-  return callTelegramWithParseModeFallback<{ message_id: number }>(botToken, "copyMessage", {
+  if (!caption || caption.length <= PHOTO_CAPTION_LIMIT) {
+    return callTelegramWithParseModeFallback<{ message_id: number }>(botToken, "copyMessage", {
+      chat_id: toChatId,
+      from_chat_id: fromChatId,
+      message_id: messageId,
+      ...(caption ? { caption, parse_mode: "HTML" } : {}),
+    });
+  }
+
+  const copyResult = await callTelegramWithParseModeFallback<{ message_id: number }>(botToken, "copyMessage", {
     chat_id: toChatId,
     from_chat_id: fromChatId,
     message_id: messageId,
-    ...(trimmedCaption ? { caption: trimmedCaption, parse_mode: "HTML" } : {}),
+    caption: shortenCaption(caption),
+    parse_mode: "HTML",
   });
+
+  await sendTelegramMessage(botToken, toChatId, caption);
+
+  return copyResult;
 }

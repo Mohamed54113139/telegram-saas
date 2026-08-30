@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch, ApiError } from "@/lib/api";
 import ImageUploadField from "@/components/ImageUploadField";
+import CaptionLengthNotice from "@/components/CaptionLengthNotice";
 
 interface MessageTemplate {
   id: string;
@@ -98,6 +99,7 @@ export default function MessagesPage() {
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Message d'accueil" required />
             <label>Contenu (utilisez {"{VARIABLE}"} pour les variables modifiables)</label>
             <textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder={"Bonjour à tous !\n\nVoici le contenu de votre message.\n\nÀ bientôt."} required />
+            <CaptionLengthNotice content={content} hasImage={!!imageUrl} />
             <ImageUploadField projectId={id} value={imageUrl} onChange={setImageUrl} />
 
             {content.includes("{HEURE+ALEATOIRE}") && (

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch, ApiError } from "@/lib/api";
 import ImageUploadField from "@/components/ImageUploadField";
+import CaptionLengthNotice from "@/components/CaptionLengthNotice";
 
 interface MessageTemplate {
   id: string;
@@ -187,6 +188,7 @@ export default function MessageDetailPage() {
 
         <label>Message modèle original</label>
         <textarea value={msg.originalContent} onChange={(e) => setMsg({ ...msg, originalContent: e.target.value })} style={{ minHeight: 140 }} />
+        <CaptionLengthNotice content={msg.originalContent} hasImage={!!msg.imageUrl} />
 
         <ImageUploadField projectId={id} value={msg.imageUrl ?? ""} onChange={(url) => setMsg({ ...msg, imageUrl: url })} />
 

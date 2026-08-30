@@ -96,5 +96,6 @@ th { color: var(--text-muted); font-weight: 500; font-size: 12px; text-transform
 
 .error-box { background: rgba(240,85,107,0.1); border: 1px solid var(--danger); color: var(--danger); padding: 10px 14px; border-radius: 8px; margin: 12px 0; font-size: 14px; }
 .success-box { background: rgba(62,207,142,0.1); border: 1px solid var(--success); color: var(--success); padding: 10px 14px; border-radius: 8px; margin: 12px 0; font-size: 14px; }
+.warning-box { background: rgba(245,181,68,0.1); border: 1px solid var(--warning); color: var(--warning); padding: 10px 14px; border-radius: 8px; margin: 12px 0; font-size: 14px; }
 
 .stack { display: flex; flex-direction: column; gap: 10px; }
