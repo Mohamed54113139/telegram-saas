@@ -127,6 +127,70 @@ function matchesFootballKeywords(title: string): boolean {
   return FOOTBALL_KEYWORDS.some((keyword) => lower.includes(keyword));
 }
 
+// Détection de doublons INTER-SOURCES, par projet : avant de publier ou
+// d'ajouter un article au digest (peu importe le mode), on compare son titre
+// à ceux des articles déjà retenus pour ce même projet (toutes sources
+// confondues) sur une fenêtre récente. Générique — s'applique à tout projet,
+// pas seulement à celui pour lequel il a été demandé (CryptoTok).
+const DUPLICATE_SIMILARITY_THRESHOLD = 0.6; // 60%
+const DUPLICATE_WINDOW_HOURS = 24;
+
+// Normalise un titre en un ensemble de mots comparables : minuscules, accents
+// retirés (pour rapprocher un minimum les titres FR/EN partageant des mots
+// communs, ex: "Bitcoin"), ponctuation retirée. Ça reste une comparaison par
+// mots partagés — pas une traduction : deux titres dans des langues très
+// différentes, sans mots en commun, ne seront pas détectés comme doublons.
+function normalizeWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+// Similarité de Jaccard : taille de l'intersection / taille de l'union des
+// ensembles de mots des deux titres.
+function jaccardSimilarity(a: string, b: string): number {
+  const wordsA = new Set(normalizeWords(a));
+  const wordsB = new Set(normalizeWords(b));
+  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+
+  let intersection = 0;
+  for (const word of wordsA) {
+    if (wordsB.has(word)) intersection++;
+  }
+  const union = wordsA.size + wordsB.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+// Cherche, parmi les titres récemment retenus pour ce projet, le plus
+// similaire au titre donné. Renvoie null si aucun ne dépasse le seuil.
+async function findSimilarRecentTitle(projectId: string, title: string): Promise<{ title: string; similarity: number } | null> {
+  const since = new Date(Date.now() - DUPLICATE_WINDOW_HOURS * 60 * 60 * 1000);
+  const recent = await prisma.recentArticleTitle.findMany({
+    where: { projectId, createdAt: { gte: since } },
+    select: { title: true },
+  });
+
+  let best: { title: string; similarity: number } | null = null;
+  for (const r of recent) {
+    const similarity = jaccardSimilarity(title, r.title);
+    if (similarity >= DUPLICATE_SIMILARITY_THRESHOLD && (!best || similarity > best.similarity)) {
+      best = { title: r.title, similarity };
+    }
+  }
+  return best;
+}
+
+// Enregistre le titre d'un article retenu (publié ou ajouté au digest), pour
+// que les prochains articles — de n'importe quelle source du même projet —
+// puissent être comparés à lui.
+async function recordRecentTitle(projectId: string, title: string): Promise<void> {
+  await prisma.recentArticleTitle.create({ data: { projectId, title } });
+}
+
 // Une source n'est revérifiée que si son intervalle (checkIntervalMinutes)
 // est écoulé depuis la dernière vérification.
 function isDueForCheck(source: ContentSource): boolean {
@@ -165,6 +229,21 @@ export async function checkSource(source: ContentSource): Promise<void> {
       const title = item.title ?? "Sans titre";
       if (source.projectId === FOOTBALL_PROJECT_ID && !matchesFootballKeywords(title)) continue;
 
+      // Doublon inter-sources : un article dont le titre est trop proche
+      // d'un article déjà retenu récemment pour ce projet (peu importe la
+      // source d'origine) est ignoré avant tout traitement coûteux (extraction,
+      // appel IA) ou toute publication.
+      const duplicate = await findSimilarRecentTitle(source.projectId, title);
+      if (duplicate) {
+        await logEvent({
+          projectId: source.projectId,
+          category: "feedWatcher",
+          message: `Article ignoré (doublon inter-sources, ${Math.round(duplicate.similarity * 100)}% similaire à "${duplicate.title}") : "${title}".`,
+          metadata: { sourceId: source.id, sourceName: source.name, similarTo: duplicate.title, similarity: duplicate.similarity },
+        });
+        continue;
+      }
+
       const link = item.link ?? null;
       const summary = item.contentSnippet ?? item.content ?? null;
 
@@ -194,6 +273,7 @@ export async function checkSource(source: ContentSource): Promise<void> {
           await prisma.digestItem.create({
             data: { projectId: source.projectId, contentSourceId: source.id, title: analysis.summary, link, summary: null },
           });
+          await recordRecentTitle(source.projectId, title);
         } catch (err: any) {
           await logEvent({
             projectId: source.projectId,
@@ -213,6 +293,7 @@ export async function checkSource(source: ContentSource): Promise<void> {
             autoEdit: false,
           },
         });
+        await recordRecentTitle(source.projectId, title);
 
         // Mode AUTO : publie immédiatement ; mode MANUAL : laisse l'utilisateur programmer lui-même
         if (source.mode === "AUTO") {

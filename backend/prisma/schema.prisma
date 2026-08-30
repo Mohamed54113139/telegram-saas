@@ -71,6 +71,7 @@ model Project {
   contentSources    ContentSource[]
   digestItems       DigestItem[]
   instructionSuggestions InstructionSuggestion[]
+  recentArticleTitles RecentArticleTitle[]
 
   @@index([userId])
   @@map("projects")
@@ -454,6 +455,22 @@ model DigestItem {
 
   @@index([projectId, consumed])
   @@map("digest_items")
+}
+
+// Titres des articles récemment retenus (publiés ou ajoutés au digest) pour
+// un projet, tous flux confondus — sert de base à la détection de doublons
+// inter-sources (similarité de Jaccard, voir feedWatcherService.ts). Un
+// article dont le titre est trop proche d'une entrée récente est ignoré,
+// quelle que soit la source d'origine.
+model RecentArticleTitle {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title     String
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@map("recent_article_titles")
 }
 
 // -------------------------------------------------------------------------
