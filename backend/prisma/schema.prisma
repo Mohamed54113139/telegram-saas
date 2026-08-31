@@ -62,6 +62,12 @@ model Project {
   // le relancer plusieurs fois le même jour (voir matchResultService.ts).
   lastMatchResultsRecapDate String?
 
+  // Notification d'échecs consécutifs (indépendante du canal public) : le
+  // chatId Telegram personnel de l'admin où alerter, et un indicateur pour
+  // ne notifier qu'une fois par série d'échecs (voir scheduler.ts).
+  adminNotifyChatId    String?
+  adminFailureNotified Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -11,8 +11,76 @@ import { logEvent } from "../services/logService";
 
 const MAX_ATTEMPTS = 3;
 const STUCK_PROCESSING_MINUTES = 5;
+// Nombre d'échecs consécutifs à partir duquel on alerte l'admin.
+const CONSECUTIVE_FAILURE_THRESHOLD = 3;
 
 let running = false; // évite les exécutions concurrentes du même tick
+
+// Compte les échecs consécutifs les plus récents pour ce projet, en ne
+// considérant que les publications réellement tentées (PUBLISHED ou FAILED —
+// jamais SCHEDULED/CANCELLED/PROCESSING, qui n'ont pas encore abouti). Un
+// PUBLISHED interrompt la série. Renvoie aussi le détail du dernier échec.
+async function countConsecutiveFailures(projectId: string): Promise<{ count: number; lastError: string | null; lastFailedAt: Date | null }> {
+  const recent = await prisma.scheduledPost.findMany({
+    where: { projectId, status: { in: ["PUBLISHED", "FAILED"] } },
+    orderBy: { updatedAt: "desc" },
+    take: 10,
+  });
+
+  let count = 0;
+  let lastError: string | null = null;
+  let lastFailedAt: Date | null = null;
+  for (const p of recent) {
+    if (p.status !== "FAILED") break;
+    count++;
+    if (lastError === null) {
+      lastError = p.lastError;
+      lastFailedAt = p.updatedAt;
+    }
+  }
+  return { count, lastError, lastFailedAt };
+}
+
+// Dès qu'une publication réussit à nouveau, on réarme la notification pour
+// la prochaine série d'échecs éventuelle.
+async function resetAdminFailureNotificationIfNeeded(project: { id: string; adminFailureNotified: boolean }): Promise<void> {
+  if (project.adminFailureNotified) {
+    await prisma.project.update({ where: { id: project.id }, data: { adminFailureNotified: false } });
+  }
+}
+
+// Alerte l'admin (chatId personnel, indépendant du canal public) dès que le
+// seuil d'échecs consécutifs est atteint — une seule fois par série grâce à
+// project.adminFailureNotified (remis à false dès qu'une publication réussit
+// à nouveau, voir processPost).
+async function notifyAdminOfConsecutiveFailures(project: { id: string; name: string; timezone: string; adminNotifyChatId: string | null; adminFailureNotified: boolean }): Promise<void> {
+  if (!project.adminNotifyChatId || project.adminFailureNotified) return;
+
+  const { count, lastError, lastFailedAt } = await countConsecutiveFailures(project.id);
+  if (count < CONSECUTIVE_FAILURE_THRESHOLD) return;
+
+  const channel = await prisma.telegramChannel.findUnique({ where: { projectId: project.id } });
+  if (!channel || channel.status !== "CONNECTED") return; // pas de bot utilisable pour notifier
+
+  const lastFailedAtLabel = lastFailedAt
+    ? new Intl.DateTimeFormat("fr-FR", { timeZone: project.timezone, dateStyle: "short", timeStyle: "short" }).format(lastFailedAt)
+    : "inconnue";
+  const text = `⚠️ ${count} échecs de publication consécutifs sur le projet "${project.name}".\n\nDernière erreur : ${lastError ?? "inconnue"}\nHeure du dernier échec : ${lastFailedAtLabel}`;
+
+  try {
+    const botToken = decryptSecret(channel.botTokenEncrypted);
+    await sendTelegramMessage(botToken, project.adminNotifyChatId, text);
+    await prisma.project.update({ where: { id: project.id }, data: { adminFailureNotified: true } });
+  } catch (err: any) {
+    await logEvent({
+      projectId: project.id,
+      level: "ERROR",
+      category: "admin-notify",
+      message: "Échec d'envoi de la notification d'échecs consécutifs à l'admin.",
+      metadata: { error: err?.message },
+    });
+  }
+}
 
 // Réclame de façon atomique un lot de publications dues, pour agir comme une file d'attente
 // simple sans double-traitement (points 47, 53, Règle 8).
@@ -70,6 +138,7 @@ async function processPost(postId: string) {
         });
 
         await logEvent({ projectId: post.projectId, category: "publication", message: "Publication (copie) envoyée avec succès.", metadata: { postId: post.id, telegramMessageId: result.message_id } });
+        await resetAdminFailureNotificationIfNeeded(post.project);
         return;
       }
 
@@ -89,6 +158,7 @@ async function processPost(postId: string) {
       });
 
       await logEvent({ projectId: post.projectId, category: "publication", message: "Publication (copie avec légende reformulée) envoyée avec succès.", metadata: { postId: post.id, telegramMessageId: result.message_id } });
+      await resetAdminFailureNotificationIfNeeded(post.project);
       return;
     }
 
@@ -110,6 +180,7 @@ async function processPost(postId: string) {
     });
 
     await logEvent({ projectId: post.projectId, category: "publication", message: "Publication envoyée avec succès.", metadata: { postId: post.id, telegramMessageId: result.message_id } });
+    await resetAdminFailureNotificationIfNeeded(post.project);
   } catch (err: any) {
     const attempts = post.attempts + 1;
     const shouldRetry = attempts < MAX_ATTEMPTS;
@@ -130,6 +201,12 @@ async function processPost(postId: string) {
       message: shouldRetry ? "Échec de publication, nouvelle tentative prévue." : "Échec définitif de publication.",
       metadata: { postId: post.id, attempts, error: err?.message },
     });
+
+    // Alerte l'admin uniquement quand le post est réellement passé en FAILED
+    // (tentatives épuisées), pas à chaque retry transitoire.
+    if (!shouldRetry) {
+      await notifyAdminOfConsecutiveFailures(post.project);
+    }
   }
 }
 

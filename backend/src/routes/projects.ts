@@ -59,6 +59,7 @@ const updateSchema = z.object({
   signatureEnabled: z.boolean().optional(),
   antiRepetitionEnabled: z.boolean().optional(),
   antiRepetitionWindow: z.number().int().positive().optional(),
+  adminNotifyChatId: z.string().nullable().optional(),
 });
 
 router.patch("/:projectId", requireProjectOwnership, async (req: AuthRequest & any, res, next) => {

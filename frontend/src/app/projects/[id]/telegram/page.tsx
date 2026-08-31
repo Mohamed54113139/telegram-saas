@@ -13,6 +13,10 @@ interface Status {
   lastError?: string;
 }
 
+interface ProjectAdminSettings {
+  adminNotifyChatId?: string | null;
+}
+
 export default function TelegramPage() {
   const { id } = useParams<{ id: string }>();
   const [status, setStatus] = useState<Status | null>(null);
@@ -22,12 +26,37 @@ export default function TelegramPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const [adminNotifyChatId, setAdminNotifyChatId] = useState("");
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [adminSuccess, setAdminSuccess] = useState<string | null>(null);
+  const [adminSaving, setAdminSaving] = useState(false);
+
   async function load() {
     const s = await apiFetch<Status>(`/api/projects/${id}/telegram/status`);
     setStatus(s);
+    const project = await apiFetch<ProjectAdminSettings>(`/api/projects/${id}`);
+    setAdminNotifyChatId(project.adminNotifyChatId ?? "");
   }
 
   useEffect(() => { load(); }, [id]);
+
+  async function handleSaveAdminNotify(e: React.FormEvent) {
+    e.preventDefault();
+    setAdminError(null);
+    setAdminSuccess(null);
+    setAdminSaving(true);
+    try {
+      await apiFetch(`/api/projects/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ adminNotifyChatId: adminNotifyChatId || null }),
+      });
+      setAdminSuccess("Enregistré.");
+    } catch (err) {
+      setAdminError(err instanceof ApiError ? err.message : "Enregistrement impossible.");
+    } finally {
+      setAdminSaving(false);
+    }
+  }
 
   async function handleConnect(e: React.FormEvent) {
     e.preventDefault();
@@ -109,6 +138,23 @@ export default function TelegramPage() {
           {success && <div className="success-box">{success}</div>}
           <div style={{ marginTop: 14 }}>
             <button type="submit" disabled={busy}>{busy ? "Vérification…" : "Connecter"}</button>
+          </div>
+        </form>
+      </div>
+
+      <div className="card">
+        <h2>Notifications d'échecs (admin)</h2>
+        <p className="muted">
+          En cas de {"3"} échecs de publication consécutifs sur ce projet, une alerte est envoyée via ce même bot vers votre chatId personnel — indépendant du canal public ci-dessus.<br />
+          Pour trouver votre chatId Telegram : envoyez un message à <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a>, qui vous le renvoie directement. Autre méthode : envoyez un message à votre propre bot, puis ouvrez <code>https://api.telegram.org/bot&lt;VOTRE_TOKEN&gt;/getUpdates</code> dans un navigateur et repérez la valeur <code>chat.id</code> dans la réponse JSON.
+        </p>
+        <form onSubmit={handleSaveAdminNotify}>
+          <label>Votre chatId Telegram personnel</label>
+          <input value={adminNotifyChatId} onChange={(e) => setAdminNotifyChatId(e.target.value)} placeholder="123456789" />
+          {adminError && <div className="error-box">{adminError}</div>}
+          {adminSuccess && <div className="success-box">{adminSuccess}</div>}
+          <div style={{ marginTop: 14 }}>
+            <button type="submit" disabled={adminSaving}>{adminSaving ? "Enregistrement…" : "Enregistrer"}</button>
           </div>
         </form>
       </div>
