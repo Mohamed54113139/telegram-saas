@@ -8,7 +8,22 @@ import { prisma } from "../config/prisma";
 import { logEvent } from "./logService";
 import { env } from "../config/env";
 
-const parser = new Parser();
+// customFields expose media:content / media:thumbnail (espace de noms Yahoo
+// Media RSS, courant sur les flux d'actualité) — rss-parser ne les inclut pas
+// par défaut, seul <enclosure> l'est nativement.
+interface FeedItemWithMedia extends Parser.Item {
+  mediaContent?: Array<{ $?: { url?: string; medium?: string; type?: string } }>;
+  mediaThumbnail?: Array<{ $?: { url?: string } }>;
+}
+
+const parser = new Parser<{}, FeedItemWithMedia>({
+  customFields: {
+    item: [
+      ["media:content", "mediaContent", { keepArray: true }],
+      ["media:thumbnail", "mediaThumbnail", { keepArray: true }],
+    ],
+  },
+});
 const aiClient = env.openaiApiKey ? new OpenAI({ apiKey: env.openaiApiKey }) : null;
 
 // Certains flux RSS mal formés contiennent des "&" isolés (ex: "Ligue 1 & 2",
@@ -53,6 +68,56 @@ async function fetchArticleText(articleUrl: string): Promise<string> {
     throw new Error("Impossible d'extraire le contenu principal de l'article.");
   }
   return article.textContent.trim();
+}
+
+// Image mise en avant fournie directement par le flux RSS (enclosure, ou
+// media:content/media:thumbnail), sans requête réseau supplémentaire.
+function extractFeedImageUrl(item: FeedItemWithMedia): string | null {
+  if (item.enclosure?.url && (!item.enclosure.type || item.enclosure.type.startsWith("image"))) {
+    return item.enclosure.url;
+  }
+
+  const media = item.mediaContent?.find(
+    (m) => m.$?.url && (!m.$.medium || m.$.medium === "image") && (!m.$.type || m.$.type.startsWith("image"))
+  );
+  if (media?.$?.url) return media.$.url;
+
+  const thumbnail = item.mediaThumbnail?.find((t) => t.$?.url);
+  if (thumbnail?.$?.url) return thumbnail.$.url;
+
+  return null;
+}
+
+// À défaut d'image fournie par le flux, va chercher l'image mise en avant
+// directement sur la page de l'article : la balise og:image en priorité,
+// sinon la première image du corps extrait par Readability. Ne lève jamais
+// d'erreur — une image non trouvée (ou une page inaccessible) ne doit
+// jamais empêcher la publication du texte seul.
+async function extractPageImageUrl(articleUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(articleUrl, { headers: { "User-Agent": BROWSER_USER_AGENT } });
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    const dom = new JSDOM(html, { url: articleUrl });
+    const document = dom.window.document;
+
+    const ogImage =
+      document.querySelector('meta[property="og:image"]')?.getAttribute("content") ||
+      document.querySelector('meta[name="og:image"]')?.getAttribute("content");
+    if (ogImage) return new URL(ogImage, articleUrl).toString();
+
+    const article = new Readability(document).parse();
+    if (article?.content) {
+      const contentDom = new JSDOM(article.content);
+      const src = contentDom.window.document.querySelector("img")?.getAttribute("src");
+      if (src) return new URL(src, articleUrl).toString();
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 interface FootballArticleAnalysis {
@@ -285,11 +350,20 @@ export async function checkSource(source: ContentSource): Promise<void> {
         }
         continue; // passe au prochain item, ne fait rien d'autre pour celui-ci
       } else {
+        // Image mise en avant : d'abord celle fournie par le flux RSS lui-même
+        // (aucune requête réseau supplémentaire), sinon celle extraite de la
+        // page de l'article (og:image en priorité, sinon première image du
+        // corps). Aucune image trouvée -> message texte seul, comme avant.
+        const imageUrl = extractFeedImageUrl(item) ?? (link ? await extractPageImageUrl(link) : null);
+
+        // Le lien source n'est volontairement pas inclus dans le contenu
+        // republié : seul le titre + le résumé du flux composent le message.
         const messageTemplate = await prisma.messageTemplate.create({
           data: {
             projectId: source.projectId,
             name: title,
-            originalContent: [title, summary, link].filter(Boolean).join("\n\n"),
+            originalContent: [title, summary].filter(Boolean).join("\n\n"),
+            imageUrl,
             autoEdit: false,
           },
         });
