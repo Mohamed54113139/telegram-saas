@@ -19,6 +19,7 @@ export const env = {
   openaiApiKey: process.env.OPENAI_API_KEY ?? "",
   openaiModel: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
   imgbbApiKey: process.env.IMGBB_API_KEY ?? "",
+  apiFootballKey: process.env.API_FOOTBALL_KEY ?? "",
   corsOrigins: (process.env.CORS_ORIGIN ?? "http://localhost:3000").split(",").map((o) => o.trim()).filter(Boolean),
   schedulerIntervalSeconds: parseInt(process.env.SCHEDULER_INTERVAL_SECONDS ?? "30", 10),
 };

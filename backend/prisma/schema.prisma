@@ -72,6 +72,7 @@ model Project {
   digestItems       DigestItem[]
   instructionSuggestions InstructionSuggestion[]
   recentArticleTitles RecentArticleTitle[]
+  matchResults MatchResult[]
 
   @@index([userId])
   @@map("projects")
@@ -494,4 +495,56 @@ model InstructionSuggestion {
 
   @@index([projectId, status])
   @@map("instruction_suggestions")
+}
+
+// -------------------------------------------------------------------------
+// SUIVI DES RÉSULTATS APRÈS-MATCH (API-Football)
+// -------------------------------------------------------------------------
+
+enum MatchResultStatus {
+  PENDING    // en attente
+  FOUND      // résultat trouvé
+  NOT_FOUND  // non trouvé après le nombre maximal de tentatives
+}
+
+// Un pronostic publié (une ligne extraite d'un DigestItem consommé), suivi
+// pour vérifier automatiquement après coup si le résultat réel du match
+// confirme ou infirme le pronostic (voir matchResultService.ts).
+model MatchResult {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  teamA       String
+  teamB       String
+  competition String? // non extrait de manière fiable depuis le format actuel (drapeau seul) — laissé pour usage futur
+  matchDate   DateTime // meilleure approximation disponible : le jour où le pronostic a été généré ("aujourd'hui" au moment de l'analyse IA)
+
+  predictedResult String // le pronostic original, tel que stocké dans le format simplifié actuel ("Équipe A gagne", "plus de 2.5 buts"...)
+
+  status        MatchResultStatus @default(PENDING)
+  attempts      Int               @default(0)
+  lastAttemptAt DateTime?
+
+  finalScoreA Int?
+  finalScoreB Int?
+  wasCorrect  Boolean?
+
+  followUpPostId String? // ScheduledPost créé pour le message de suivi, une fois le résultat trouvé et publié
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, status, matchDate])
+  @@map("match_results")
+}
+
+// Journal des appels réellement effectués à l'API-Football, pour respecter
+// le quota quotidien du forfait gratuit (voir matchResultService.ts).
+model ApiFootballCall {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("api_football_calls")
 }

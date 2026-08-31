@@ -6,6 +6,7 @@ import { decryptSecret } from "../utils/crypto";
 import { sendTelegramMessage, sendTelegramPhoto, copyTelegramMessage } from "../services/telegramService";
 import { materializeAllActiveSchedules, materializeAllActiveRecurringSessions } from "../services/scheduleMaterializationService";
 import { checkAllActiveSources } from "../services/feedWatcherService";
+import { checkPendingMatchResults } from "../services/matchResultService";
 import { logEvent } from "../services/logService";
 
 const MAX_ATTEMPTS = 3;
@@ -194,5 +195,11 @@ export async function startScheduler() {
   const seconds = Math.max(10, env.schedulerIntervalSeconds);
   cron.schedule(`*/${seconds} * * * * *`, () => {
     tick().catch((e) => console.error("Erreur scheduler:", e));
+  });
+
+  // Suivi des résultats après-match : job séparé, horaire (indépendant du
+  // tick principal), voir matchResultService.ts.
+  cron.schedule("0 * * * *", () => {
+    checkPendingMatchResults().catch((e) => console.error("Erreur suivi des résultats:", e));
   });
 }
