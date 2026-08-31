@@ -57,6 +57,11 @@ model Project {
   antiRepetitionEnabled Boolean @default(false)
   antiRepetitionWindow  Int     @default(10) // nb de publications récentes à comparer
 
+  // Date (YYYY-MM-DD, jour civil du fuseau du projet) du dernier
+  // récapitulatif quotidien des résultats après-match déjà publié — évite de
+  // le relancer plusieurs fois le même jour (voir matchResultService.ts).
+  lastMatchResultsRecapDate String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

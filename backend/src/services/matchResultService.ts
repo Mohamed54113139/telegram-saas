@@ -2,19 +2,33 @@ import fetch from "node-fetch";
 import { MatchResult, Project } from "@prisma/client";
 import { prisma } from "../config/prisma";
 import { env } from "../config/env";
-import { localDateParts } from "../utils/timezone";
+import { localDateParts, localTimeParts } from "../utils/timezone";
 import { logEvent } from "./logService";
 
-// Le résultat n'est cherché qu'une fois le match probablement terminé.
-const RESULT_LOOKUP_DELAY_HOURS = 3;
+// Heure locale (fuseau du projet) du récapitulatif quotidien.
+const DAILY_RECAP_HOUR = 23;
+const DAILY_RECAP_MINUTE = 30;
+// Fenêtre de tolérance (en minutes) : ce job est vérifié périodiquement
+// (voir checkDailyMatchResultsRecap), pas exactement à la seconde près.
+const DAILY_RECAP_WINDOW_MINUTES = 15;
+
 // Après ce nombre de tentatives infructueuses (réparties sur plusieurs
-// cycles horaires), on arrête d'essayer pour ce match.
+// jours), on arrête d'essayer pour ce match.
 const MAX_LOOKUP_ATTEMPTS = 5;
-// Forfait gratuit API-Football : 100 requêtes/jour. On garde une marge de
-// sécurité plutôt que de viser exactement la limite.
+// Forfait gratuit API-Football : 100 requêtes/jour. On garde une petite
+// marge de sécurité plutôt que de viser exactement la limite.
 const DAILY_CALL_LIMIT = 90;
 
 const API_FOOTBALL_BASE_URL = "https://v3.football.api-sports.io";
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function dateKeyInTimezone(date: Date, timezone: string): string {
+  const { year, month, day } = localDateParts(date, timezone);
+  return `${year}-${pad(month)}-${pad(day)}`;
+}
 
 interface ApiFootballFixture {
   teamHome: string;
@@ -103,70 +117,52 @@ export function evaluatePrediction(predictedResult: string, teamA: string, teamB
   return null;
 }
 
-// Crée un ScheduledPost de suivi (même mécanisme que les articles de veille :
-// un MessageTemplate à la volée + un ScheduledPost immédiat), publié sur le
-// même canal Telegram du projet via le cycle normal du scheduler.
-async function publishFollowUp(match: MatchResult, scoreA: number, scoreB: number, wasCorrect: boolean | null): Promise<string> {
-  const verdict = wasCorrect === null ? "résultat non déterminé automatiquement" : wasCorrect ? "correct ✅" : "incorrect ❌";
-  const text = `⚽ ${match.teamA} ${scoreA} - ${scoreB} ${match.teamB} — Pronostic : ${verdict}`;
-
-  const messageTemplate = await prisma.messageTemplate.create({
-    data: {
-      projectId: match.projectId,
-      name: `Suivi résultat : ${match.teamA} vs ${match.teamB}`,
-      originalContent: text,
-      autoEdit: false,
-    },
-  });
-
-  const post = await prisma.scheduledPost.create({
-    data: {
-      projectId: match.projectId,
-      messageTemplateId: messageTemplate.id,
-      idempotencyKey: `matchresult:${match.id}`,
-      scheduledFor: new Date(),
-      status: "SCHEDULED",
-    },
-  });
-
-  return post.id;
+function formatVerdict(wasCorrect: boolean | null): string {
+  if (wasCorrect === null) return "résultat non déterminé automatiquement";
+  return wasCorrect ? "correct ✅" : "incorrect ❌";
 }
 
-// Job périodique (toutes les heures) : cherche le résultat des matchs en
-// attente dont le coup d'envoi est passé depuis au moins 3h, publie un
-// message de suivi quand le résultat est trouvé, et abandonne après 5
-// tentatives infructueuses. Respecte un quota quotidien d'appels API, en
-// priorisant les matchs en attente les plus anciens.
-export async function checkPendingMatchResults(): Promise<void> {
-  if (!env.apiFootballKey) return; // pas de log répété à chaque heure si simplement non configuré
+// Traite le récapitulatif quotidien pour un projet : interroge l'API-Football
+// pour chaque match en attente (dans la limite du quota restant du jour, en
+// priorisant les plus anciens), regroupe tous les résultats trouvés en un
+// seul message, et le publie via un ScheduledPost classique.
+async function runDailyRecapForProject(project: Project, todayKey: string): Promise<void> {
+  // Marqué tout de suite : ne doit jamais se relancer deux fois le même jour
+  // pour ce projet, même si la suite échoue en cours de route.
+  await prisma.project.update({ where: { id: project.id }, data: { lastMatchResultsRecapDate: todayKey } });
 
-  const threshold = new Date(Date.now() - RESULT_LOOKUP_DELAY_HOURS * 60 * 60 * 1000);
   const pending = await prisma.matchResult.findMany({
-    where: { status: "PENDING", matchDate: { lte: threshold } },
-    orderBy: { matchDate: "asc" }, // les plus anciens en premier si le quota est serré
-    include: { project: true },
+    where: { projectId: project.id, status: "PENDING" },
+    orderBy: { matchDate: "asc" }, // les plus anciens en attente en premier si le quota est serré
   });
   if (pending.length === 0) return;
+
+  if (!env.apiFootballKey) {
+    await logEvent({
+      projectId: project.id,
+      category: "matchResults",
+      level: "WARN",
+      message: "API_FOOTBALL_KEY non configurée : récapitulatif quotidien des résultats ignoré.",
+    });
+    return;
+  }
 
   const startOfUtcDay = new Date();
   startOfUtcDay.setUTCHours(0, 0, 0, 0);
   let callsUsedToday = await prisma.apiFootballCall.count({ where: { createdAt: { gte: startOfUtcDay } } });
 
   const fixturesByDate = new Map<string, ApiFootballFixture[]>();
+  const found: { match: MatchResult; scoreA: number; scoreB: number; wasCorrect: boolean | null }[] = [];
+  let quotaReached = false;
 
-  for (const match of pending as (MatchResult & { project: Project })[]) {
+  for (const match of pending) {
     if (callsUsedToday >= DAILY_CALL_LIMIT) {
-      await logEvent({
-        category: "matchResults",
-        level: "WARN",
-        message: `Limite quotidienne d'appels API-Football atteinte (${DAILY_CALL_LIMIT}), matchs restants reportés au prochain cycle.`,
-      });
+      quotaReached = true;
       break;
     }
 
     try {
-      const { year, month, day } = localDateParts(match.matchDate, match.project.timezone);
-      const dateKey = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const dateKey = dateKeyInTimezone(match.matchDate, project.timezone);
 
       let fixtures = fixturesByDate.get(dateKey);
       if (!fixtures) {
@@ -180,8 +176,6 @@ export async function checkPendingMatchResults(): Promise<void> {
 
       if (fixture?.isFinal) {
         const wasCorrect = evaluatePrediction(match.predictedResult, match.teamA, match.teamB, fixture.scoreForA, fixture.scoreForB);
-        const followUpPostId = await publishFollowUp(match, fixture.scoreForA, fixture.scoreForB, wasCorrect);
-
         await prisma.matchResult.update({
           where: { id: match.id },
           data: {
@@ -189,30 +183,19 @@ export async function checkPendingMatchResults(): Promise<void> {
             finalScoreA: fixture.scoreForA,
             finalScoreB: fixture.scoreForB,
             wasCorrect,
-            followUpPostId,
             attempts: { increment: 1 },
             lastAttemptAt: new Date(),
           },
         });
-
-        await logEvent({
-          projectId: match.projectId,
-          category: "matchResults",
-          message: `Résultat trouvé pour ${match.teamA} vs ${match.teamB} (${fixture.scoreForA}-${fixture.scoreForB}), suivi publié.`,
-          metadata: { matchResultId: match.id, wasCorrect },
-        });
+        found.push({ match, scoreA: fixture.scoreForA, scoreB: fixture.scoreForB, wasCorrect });
       } else {
         const attempts = match.attempts + 1;
         const status = attempts >= MAX_LOOKUP_ATTEMPTS ? "NOT_FOUND" : "PENDING";
-
-        await prisma.matchResult.update({
-          where: { id: match.id },
-          data: { attempts, status, lastAttemptAt: new Date() },
-        });
+        await prisma.matchResult.update({ where: { id: match.id }, data: { attempts, status, lastAttemptAt: new Date() } });
 
         if (status === "NOT_FOUND") {
           await logEvent({
-            projectId: match.projectId,
+            projectId: project.id,
             level: "WARN",
             category: "matchResults",
             message: `Résultat introuvable pour ${match.teamA} vs ${match.teamB} après ${attempts} tentative(s), abandon.`,
@@ -222,11 +205,91 @@ export async function checkPendingMatchResults(): Promise<void> {
       }
     } catch (err: any) {
       await logEvent({
-        projectId: match.projectId,
+        projectId: project.id,
         level: "ERROR",
         category: "matchResults",
         message: `Échec de vérification du résultat pour ${match.teamA} vs ${match.teamB}.`,
         metadata: { matchResultId: match.id, error: err?.message },
+      });
+    }
+  }
+
+  if (quotaReached) {
+    await logEvent({
+      projectId: project.id,
+      category: "matchResults",
+      level: "WARN",
+      message: `Limite quotidienne d'appels API-Football atteinte (${DAILY_CALL_LIMIT}), matchs restants reportés au lendemain.`,
+    });
+  }
+
+  if (found.length === 0) return;
+
+  const lines = found.map(
+    ({ match, scoreA, scoreB, wasCorrect }) => `⚽ ${match.teamA} ${scoreA} - ${scoreB} ${match.teamB} — Pronostic : ${formatVerdict(wasCorrect)}`
+  );
+  const text = lines.join("\n");
+
+  const messageTemplate = await prisma.messageTemplate.create({
+    data: {
+      projectId: project.id,
+      name: `Récapitulatif résultats du ${todayKey}`,
+      originalContent: text,
+      autoEdit: false,
+    },
+  });
+
+  const post = await prisma.scheduledPost.create({
+    data: {
+      projectId: project.id,
+      messageTemplateId: messageTemplate.id,
+      idempotencyKey: `matchresults-recap:${project.id}:${todayKey}`,
+      scheduledFor: new Date(),
+      status: "SCHEDULED",
+    },
+  });
+
+  await prisma.matchResult.updateMany({
+    where: { id: { in: found.map((r) => r.match.id) } },
+    data: { followUpPostId: post.id },
+  });
+
+  await logEvent({
+    projectId: project.id,
+    category: "matchResults",
+    message: `Récapitulatif quotidien des résultats publié (${found.length} match(s)).`,
+    metadata: { postId: post.id, count: found.length },
+  });
+}
+
+// Vérifie, pour chaque projet ayant des matchs en attente, s'il est
+// actuellement l'heure du récapitulatif quotidien (23h30 dans SON fuseau
+// horaire) et si ce n'est pas déjà fait aujourd'hui. Conçu pour être appelé
+// fréquemment (toutes les 15 min) plutôt que de nécessiter un cron distinct
+// par fuseau horaire.
+export async function checkDailyMatchResultsRecap(): Promise<void> {
+  const projects = await prisma.project.findMany({
+    where: { matchResults: { some: { status: "PENDING" } } },
+  });
+
+  for (const project of projects) {
+    const { hour, minute } = localTimeParts(new Date(), project.timezone);
+    const isRecapWindow =
+      hour === DAILY_RECAP_HOUR && minute >= DAILY_RECAP_MINUTE && minute < DAILY_RECAP_MINUTE + DAILY_RECAP_WINDOW_MINUTES;
+    if (!isRecapWindow) continue;
+
+    const todayKey = dateKeyInTimezone(new Date(), project.timezone);
+    if (project.lastMatchResultsRecapDate === todayKey) continue; // déjà fait aujourd'hui
+
+    try {
+      await runDailyRecapForProject(project, todayKey);
+    } catch (err: any) {
+      await logEvent({
+        projectId: project.id,
+        level: "ERROR",
+        category: "matchResults",
+        message: "Échec du récapitulatif quotidien des résultats.",
+        metadata: { error: err?.message },
       });
     }
   }
