@@ -4,6 +4,33 @@ import { zonedTimeToUtc, parseTime, weekdayInTimezone, localDateParts, localTime
 import { calculateSessionOccurrences } from "./sessionCalcService";
 import { logEvent } from "./logService";
 
+// Le tick du scheduler tourne toutes les 30s, mais la liste des schedules/
+// sessions actifs (et leur projet) change rarement — on la garde en mémoire
+// pendant quelques minutes plutôt que de la relire à chaque cycle, pour
+// réduire le volume de requêtes envoyées à la base (quota réseau Neon).
+// Effet de bord accepté : une désactivation/suppression très récente peut
+// mettre jusqu'à ce délai avant d'être prise en compte par ce cycle
+// périodique (la création/édition via les routes, elle, matérialise
+// toujours immédiatement et n'est jamais concernée par ce cache).
+const ACTIVE_LIST_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+let schedulesCache: { data: (Schedule & { project: Project })[]; expiresAt: number } | null = null;
+let sessionsCache: { data: (Session & { project: Project })[]; expiresAt: number } | null = null;
+
+async function getActiveSchedulesCached(): Promise<(Schedule & { project: Project })[]> {
+  if (schedulesCache && schedulesCache.expiresAt > Date.now()) return schedulesCache.data;
+  const data = await prisma.schedule.findMany({ where: { active: true }, include: { project: true } });
+  schedulesCache = { data, expiresAt: Date.now() + ACTIVE_LIST_CACHE_TTL_MS };
+  return data;
+}
+
+async function getActiveRecurringSessionsCached(): Promise<(Session & { project: Project })[]> {
+  if (sessionsCache && sessionsCache.expiresAt > Date.now()) return sessionsCache.data;
+  const data = await prisma.session.findMany({ where: { active: true, recurring: true }, include: { project: true } });
+  sessionsCache = { data, expiresAt: Date.now() + ACTIVE_LIST_CACHE_TTL_MS };
+  return data;
+}
+
 type UpsertOutcome = "created" | "reactivated" | "skipped";
 
 // Crée l'occurrence si elle n'existe pas encore (clé d'idempotence), la
@@ -121,7 +148,7 @@ export async function materializeSchedule(schedule: Schedule, project: Project, 
 
 // Matérialise toutes les programmations actives (appelé par le scheduler périodique)
 export async function materializeAllActiveSchedules(): Promise<void> {
-  const schedules = await prisma.schedule.findMany({ where: { active: true }, include: { project: true } });
+  const schedules = await getActiveSchedulesCached();
   for (const schedule of schedules) {
     try {
       await materializeSchedule(schedule, schedule.project);
@@ -209,7 +236,7 @@ export async function materializeSession(session: Session, project: Project, win
 
 // Matérialise toutes les sessions récurrentes actives (appelé par le scheduler périodique)
 export async function materializeAllActiveRecurringSessions(): Promise<void> {
-  const sessions = await prisma.session.findMany({ where: { active: true, recurring: true }, include: { project: true } });
+  const sessions = await getActiveRecurringSessionsCached();
   for (const session of sessions) {
     try {
       await materializeSession(session, session.project);

@@ -90,18 +90,28 @@ async function claimDuePosts(limit = 20) {
     where: { status: "SCHEDULED", scheduledFor: { lte: now }, isSimulation: false },
     orderBy: { scheduledFor: "asc" },
     take: limit,
+    select: { id: true },
+  });
+  if (due.length === 0) return [];
+
+  const dueIds = due.map((p) => p.id);
+
+  // Un seul UPDATE groupé (au lieu d'un par publication) : la clause WHERE
+  // status="SCHEDULED" reste vérifiée ligne par ligne par Postgres, donc le
+  // verrouillage optimiste reste sûr même en batch — sûr ici en particulier
+  // car un seul tick tourne à la fois dans ce process (flag `running`), donc
+  // aucune autre écriture ne peut passer un de ces id à PROCESSING entre les
+  // deux requêtes ci-dessous.
+  await prisma.scheduledPost.updateMany({
+    where: { id: { in: dueIds }, status: "SCHEDULED" },
+    data: { status: "PROCESSING" },
   });
 
-  const claimed = [];
-  for (const post of due) {
-    // updateMany avec condition sur le statut actuel = verrouillage optimiste
-    const result = await prisma.scheduledPost.updateMany({
-      where: { id: post.id, status: "SCHEDULED" },
-      data: { status: "PROCESSING" },
-    });
-    if (result.count === 1) claimed.push(post.id);
-  }
-  return claimed;
+  const claimed = await prisma.scheduledPost.findMany({
+    where: { id: { in: dueIds }, status: "PROCESSING" },
+    select: { id: true },
+  });
+  return claimed.map((p) => p.id);
 }
 
 async function processPost(postId: string) {
