@@ -262,21 +262,49 @@ async function runDailyRecapForProject(project: Project, todayKey: string): Prom
   });
 }
 
+// Fuseaux horaires des projets ayant des matchs en attente, mis en cache une
+// heure (un fuseau change essentiellement jamais) — sert uniquement à savoir,
+// sans requête, si CE passage (toutes les 15 min) a une chance d'être utile
+// avant de faire le vrai prisma.project.findMany().
+const RELEVANT_TIMEZONES_CACHE_TTL_MS = 60 * 60 * 1000; // 1 heure
+
+let relevantTimezonesCache: { data: string[]; expiresAt: number } | null = null;
+
+async function getRelevantTimezonesCached(): Promise<string[]> {
+  if (relevantTimezonesCache && relevantTimezonesCache.expiresAt > Date.now()) return relevantTimezonesCache.data;
+  const projects = await prisma.project.findMany({
+    where: { matchResults: { some: { status: "PENDING" } } },
+    select: { timezone: true },
+  });
+  const data = projects.map((p) => p.timezone);
+  relevantTimezonesCache = { data, expiresAt: Date.now() + RELEVANT_TIMEZONES_CACHE_TTL_MS };
+  return data;
+}
+
+function isWithinRecapWindow(timezone: string): boolean {
+  const { hour, minute } = localTimeParts(new Date(), timezone);
+  return hour === DAILY_RECAP_HOUR && minute >= DAILY_RECAP_MINUTE && minute < DAILY_RECAP_MINUTE + DAILY_RECAP_WINDOW_MINUTES;
+}
+
 // Vérifie, pour chaque projet ayant des matchs en attente, s'il est
 // actuellement l'heure du récapitulatif quotidien (23h30 dans SON fuseau
 // horaire) et si ce n'est pas déjà fait aujourd'hui. Conçu pour être appelé
 // fréquemment (toutes les 15 min) plutôt que de nécessiter un cron distinct
 // par fuseau horaire.
 export async function checkDailyMatchResultsRecap(): Promise<void> {
+  // Sortie immédiate, sans toucher la base, dès qu'aucun fuseau pertinent
+  // n'est dans la fenêtre du récapitulatif — couvre la quasi-totalité des
+  // ~96 passages quotidiens (seul un passage par fuseau, une fois par jour,
+  // va réellement plus loin).
+  const relevantTimezones = await getRelevantTimezonesCached();
+  if (!relevantTimezones.some(isWithinRecapWindow)) return;
+
   const projects = await prisma.project.findMany({
     where: { matchResults: { some: { status: "PENDING" } } },
   });
 
   for (const project of projects) {
-    const { hour, minute } = localTimeParts(new Date(), project.timezone);
-    const isRecapWindow =
-      hour === DAILY_RECAP_HOUR && minute >= DAILY_RECAP_MINUTE && minute < DAILY_RECAP_MINUTE + DAILY_RECAP_WINDOW_MINUTES;
-    if (!isRecapWindow) continue;
+    if (!isWithinRecapWindow(project.timezone)) continue;
 
     const todayKey = dateKeyInTimezone(new Date(), project.timezone);
     if (project.lastMatchResultsRecapDate === todayKey) continue; // déjà fait aujourd'hui

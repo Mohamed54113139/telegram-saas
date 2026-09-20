@@ -403,9 +403,25 @@ export async function checkSource(source: ContentSource): Promise<void> {
   }
 }
 
+// Même principe que le cache des schedules/sessions actifs
+// (scheduleMaterializationService.ts) : la liste des sources actives change
+// rarement, on évite de la relire à chaque tick. La création/modification
+// d'une source continue de se répercuter immédiatement via routes/sources.ts,
+// qui opère directement sur la source concernée, jamais via ce cache.
+const ACTIVE_SOURCES_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+let activeSourcesCache: { data: ContentSource[]; expiresAt: number } | null = null;
+
+async function getActiveSourcesCached(): Promise<ContentSource[]> {
+  if (activeSourcesCache && activeSourcesCache.expiresAt > Date.now()) return activeSourcesCache.data;
+  const data = await prisma.contentSource.findMany({ where: { active: true } });
+  activeSourcesCache = { data, expiresAt: Date.now() + ACTIVE_SOURCES_CACHE_TTL_MS };
+  return data;
+}
+
 // Vérifie toutes les sources actives (appelé par le scheduler périodique)
 export async function checkAllActiveSources(): Promise<void> {
-  const sources = await prisma.contentSource.findMany({ where: { active: true } });
+  const sources = await getActiveSourcesCached();
   for (const source of sources) {
     if (!isDueForCheck(source)) continue;
     await checkSource(source);
