@@ -25,16 +25,25 @@ export function resolveVariables(
   // indépendant de son remplacement générique. Le tirage se refait à chaque
   // appel de resolveVariables, donc à chaque envoi réel (scheduler), pas à
   // la création du message.
+  //
+  // Si la variable apparaît plusieurs fois dans le même message (ex: une
+  // liste de plusieurs pronostics, chacun avec son heure), chaque occurrence
+  // est calculée à partir de la précédente plutôt qu'indépendamment depuis
+  // "maintenant" — les heures affichées se suivent donc toujours dans
+  // l'ordre croissant, jamais dans le désordre.
   const randomHeurePattern = /\{HEURE\+ALEATOIRE\}/g;
+  let randomHeureCursor = now;
+  let randomHeureIndex = 0;
   resolved = resolved.replace(randomHeurePattern, () => {
     const min = randomTimeRange.randomMinMinutes ?? 5;
     const max = randomTimeRange.randomMaxMinutes ?? 15;
     const lowerBound = Math.min(min, max);
     const upperBound = Math.max(min, max);
     const minutes = Math.floor(Math.random() * (upperBound - lowerBound + 1)) + lowerBound;
-    const target = new Date(now.getTime() + minutes * 60_000);
-    const value = fmtTime.format(target);
-    usedValues["HEURE+ALEATOIRE"] = value;
+    randomHeureCursor = new Date(randomHeureCursor.getTime() + minutes * 60_000);
+    const value = fmtTime.format(randomHeureCursor);
+    randomHeureIndex++;
+    usedValues[`HEURE+ALEATOIRE#${randomHeureIndex}`] = value;
     return value;
   });
 
