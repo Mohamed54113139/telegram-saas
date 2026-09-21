@@ -184,7 +184,7 @@ RÈGLES ABSOLUES :
 // projet "Mhd pcs" (pronostics football) — voir FOOTBALL_PROJECT_ID plus bas.
 // Identifié par ID plutôt que par nom : le nom d'un projet est modifiable
 // depuis Paramètres, un ID ne change jamais.
-const FOOTBALL_PROJECT_ID = "6a206a35-8f0e-465f-aa9f-364f1941227c";
+const FOOTBALL_PROJECT_ID = "fb04d7fc-9b9e-4e1b-bc94-b24fe3e32478";
 const FOOTBALL_KEYWORDS = ["football", "foot", "match", "pronostic", "predictions", "tips", "betting"];
 
 function matchesFootballKeywords(title: string): boolean {
