@@ -7,7 +7,7 @@ import { logEvent } from "./logService";
 
 // Heure locale (fuseau du projet) du récapitulatif quotidien.
 const DAILY_RECAP_HOUR = 23;
-const DAILY_RECAP_MINUTE = 30;
+const DAILY_RECAP_MINUTE = 0;
 // Fenêtre de tolérance (en minutes) : ce job est vérifié périodiquement
 // (voir checkDailyMatchResultsRecap), pas exactement à la seconde près.
 const DAILY_RECAP_WINDOW_MINUTES = 15;
@@ -287,7 +287,7 @@ function isWithinRecapWindow(timezone: string): boolean {
 }
 
 // Vérifie, pour chaque projet ayant des matchs en attente, s'il est
-// actuellement l'heure du récapitulatif quotidien (23h30 dans SON fuseau
+// actuellement l'heure du récapitulatif quotidien (23h00 dans SON fuseau
 // horaire) et si ce n'est pas déjà fait aujourd'hui. Conçu pour être appelé
 // fréquemment (toutes les 15 min) plutôt que de nécessiter un cron distinct
 // par fuseau horaire.
