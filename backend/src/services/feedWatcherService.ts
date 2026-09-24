@@ -151,7 +151,10 @@ async function analyzeFootballArticle(articleText: string, timezone: string): Pr
 Nous sommes aujourd'hui le ${todayLabel} (fuseau horaire du projet).
 
 RÈGLES ABSOLUES :
-1. Détermine si l'article concerne un ou plusieurs matchs de football ayant lieu PRÉCISÉMENT aujourd'hui. Si ce n'est pas identifiable avec certitude (date différente, date absente ou ambiguë, article pas centré sur un match précis), rejette : hasMatchToday=false, summary=null. En cas de doute, rejette plutôt que de deviner.
+1. Détermine si l'article concerne un ou plusieurs matchs de football MASCULIN professionnel d'IMPORTANCE RECONNUE, ayant lieu PRÉCISÉMENT aujourd'hui :
+   - Accepté : grands championnats nationaux (ex: Premier League, Championship, LaLiga, Serie A, Bundesliga, Ligue 1, Liga Portugal, Eredivisie, Jupiler Pro League, grandes ligues sud-américaines et nord-américaines...), leurs coupes nationales majeures, les compétitions continentales/internationales (Ligue des Champions, Ligue Europa, Conference League, Coupe du Monde, Euro, Copa América, éliminatoires officiels de sélections), et plus largement toute compétition qu'un supporter de football grand public reconnaîtrait facilement.
+   - Rejeté systématiquement (hasMatchToday=false), même si la date est claire : football féminin, équipes réserves/espoirs/jeunes/U21 et moins, divisions amateurs ou de bas niveau (ex: 4e-5e division et en dessous dans un grand pays, ligues régionales), matchs amicaux sans enjeu compétitif clair.
+   - Si la date n'est pas identifiable avec certitude (date différente, absente ou ambiguë) ou si le niveau/l'importance de la compétition n'est pas identifiable avec certitude, rejette également : hasMatchToday=false, summary=null. En cas de doute, rejette plutôt que de deviner.
 2. N'invente JAMAIS de cote, statistique ou information qui n'est pas explicitement mentionnée dans le texte fourni.
 3. Si accepté, produis en français UNE SEULE LIGNE STRICTE par match identifié, SANS justification et sans aucun autre texte, au format exact :
 [drapeau emoji du pays de la compétition] Équipe A vs Équipe B : [résultat prédit]
