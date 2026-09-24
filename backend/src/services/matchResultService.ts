@@ -154,6 +154,12 @@ async function runDailyRecapForProject(project: Project, todayKey: string): Prom
   const fixturesByDate = new Map<string, ApiFootballFixture[]>();
   const found: { match: MatchResult; scoreA: number; scoreB: number; wasCorrect: boolean | null }[] = [];
   let quotaReached = false;
+  // Compteurs de diagnostic uniquement : permettent de comprendre, via les
+  // logs, POURQUOI aucun match n'a été confirmé un soir donné (équipe non
+  // trouvée dans l'API vs match simplement pas encore terminé), plutôt que
+  // de sortir silencieusement sans aucune trace.
+  let noFixtureCount = 0;
+  let notFinalYetCount = 0;
 
   for (const match of pending) {
     if (callsUsedToday >= DAILY_CALL_LIMIT) {
@@ -189,6 +195,9 @@ async function runDailyRecapForProject(project: Project, todayKey: string): Prom
         });
         found.push({ match, scoreA: fixture.scoreForA, scoreB: fixture.scoreForB, wasCorrect });
       } else {
+        if (fixture) notFinalYetCount++;
+        else noFixtureCount++;
+
         const attempts = match.attempts + 1;
         const status = attempts >= MAX_LOOKUP_ATTEMPTS ? "NOT_FOUND" : "PENDING";
         await prisma.matchResult.update({ where: { id: match.id }, data: { attempts, status, lastAttemptAt: new Date() } });
@@ -223,7 +232,20 @@ async function runDailyRecapForProject(project: Project, todayKey: string): Prom
     });
   }
 
-  if (found.length === 0) return;
+  if (found.length === 0) {
+    // Trace explicite : sans ce log, une soirée sans aucun match confirmé
+    // (équipes introuvables côté API-Football, matchs pas encore terminés au
+    // moment du passage, etc.) ne laissait aucune information consultable
+    // dans le Journal du projet.
+    await logEvent({
+      projectId: project.id,
+      category: "matchResults",
+      level: "WARN",
+      message: `Récapitulatif quotidien : aucun résultat confirmé ce soir (${pending.length} pronostic(s) en attente, ${noFixtureCount} équipe(s) introuvable(s) dans l'API-Football, ${notFinalYetCount} match(s) pas encore terminé(s)).`,
+      metadata: { pendingCount: pending.length, noFixtureCount, notFinalYetCount },
+    });
+    return;
+  }
 
   const lines = found.map(
     ({ match, scoreA, scoreB, wasCorrect }) => `⚽ ${match.teamA} ${scoreA} - ${scoreB} ${match.teamB} — Pronostic : ${formatVerdict(wasCorrect)}`
