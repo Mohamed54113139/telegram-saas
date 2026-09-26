@@ -455,15 +455,19 @@ model ContentSourceItem {
 // Éléments accumulés par une source en mode digest, en attente d'être
 // consommés par la variable {PRONOS_DU_JOUR} au moment de la génération
 model DigestItem {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   projectId       String
-  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   contentSourceId String
   title           String
   link            String?
   summary         String?
-  consumed        Boolean  @default(false)
-  createdAt       DateTime @default(now())
+  consumed        Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  // Date réelle du match extraite par l'IA (peut différer de createdAt : un
+  // article "preview" est souvent publié 1-2 jours avant le match). Null si
+  // non identifiable — createdAt reste alors utilisé en repli.
+  matchDate       DateTime?
 
   @@index([projectId, consumed])
   @@map("digest_items")

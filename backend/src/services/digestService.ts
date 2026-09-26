@@ -52,10 +52,11 @@ export async function resolveDigestVariable(projectId: string): Promise<string> 
           teamA: parsed.teamA,
           teamB: parsed.teamB,
           predictedResult: parsed.predictedResult,
-          // Le format actuel ne mentionne pas d'heure de coup d'envoi précise ;
-          // la date de création du digest est la meilleure approximation
-          // disponible du jour "aujourd'hui" retenu par l'analyse IA.
-          matchDate: item.createdAt,
+          // Date réelle du match extraite par l'IA (feedWatcherService.ts) si
+          // disponible — un article "preview" est souvent publié 1-2 jours
+          // avant le match, donc createdAt seul serait faux dans ce cas.
+          // Repli sur createdAt uniquement si la date n'a pas pu être extraite.
+          matchDate: item.matchDate ?? item.createdAt,
         },
       });
     }

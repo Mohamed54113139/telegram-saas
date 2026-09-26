@@ -7,6 +7,7 @@ import { ContentSource } from "@prisma/client";
 import { prisma } from "../config/prisma";
 import { logEvent } from "./logService";
 import { env } from "../config/env";
+import { zonedTimeToUtc } from "../utils/timezone";
 
 // customFields expose media:content / media:thumbnail (espace de noms Yahoo
 // Media RSS, courant sur les flux d'actualité) — rss-parser ne les inclut pas
@@ -123,19 +124,26 @@ async function extractPageImageUrl(articleUrl: string): Promise<string | null> {
 interface FootballArticleAnalysis {
   hasMatchToday: boolean;
   summary: string | null;
+  // Date réelle du/des match(s), au format YYYY-MM-DD, telle qu'extraite de
+  // l'article — PAS la date de l'article lui-même. Beaucoup de sites de tips
+  // publient leurs previews 1 à 2 jours avant le coup d'envoi ; le pronostic
+  // reste valable, mais la vérification du résultat (API-Football) doit
+  // interroger le VRAI jour du match, pas le jour où l'article a été publié.
+  matchDateISO: string | null;
 }
 
 // Demande à l'IA si l'article concerne un ou plusieurs matchs de football se
-// jouant précisément aujourd'hui (dans le fuseau horaire du projet), et si
-// oui, produit une ligne stricte par match ("[drapeau] Équipe A vs Équipe B :
-// résultat prédit"), sans justification, sans jamais inventer de cote ou de
-// statistique absente du texte source. En cas de doute, l'article est
-// rejeté plutôt que deviné.
+// jouant aujourd'hui ou dans les 2 prochains jours (dans le fuseau horaire du
+// projet), et si oui, produit une ligne stricte par match ("[drapeau] Équipe
+// A vs Équipe B : résultat prédit"), sans justification, sans jamais inventer
+// de cote ou de statistique absente du texte source. En cas de doute,
+// l'article est rejeté plutôt que deviné.
 async function analyzeFootballArticle(articleText: string, timezone: string): Promise<FootballArticleAnalysis> {
   if (!aiClient) {
-    return { hasMatchToday: false, summary: null };
+    return { hasMatchToday: false, summary: null, matchDateISO: null };
   }
 
+  const now = new Date();
   const todayLabel = new Intl.DateTimeFormat("fr-FR", {
     timeZone: timezone,
     weekday: "long",
@@ -143,26 +151,28 @@ async function analyzeFootballArticle(articleText: string, timezone: string): Pr
     month: "long",
     year: "numeric",
   })
-    .format(new Date())
+    .format(now)
     .toLowerCase();
+  const todayISO = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now); // YYYY-MM-DD
 
   const systemPrompt = `Tu analyses un article de site de pronostics football pour un système de publication automatisée.
 
-Nous sommes aujourd'hui le ${todayLabel} (fuseau horaire du projet).
+Nous sommes aujourd'hui le ${todayLabel}, soit ${todayISO} au format AAAA-MM-JJ (fuseau horaire du projet).
 
 RÈGLES ABSOLUES :
-1. Détermine si l'article concerne un ou plusieurs matchs de football MASCULIN professionnel d'IMPORTANCE RECONNUE, ayant lieu PRÉCISÉMENT aujourd'hui :
-   - Accepté : grands championnats nationaux (ex: Premier League, Championship, LaLiga, Serie A, Bundesliga, Ligue 1, Liga Portugal, Eredivisie, Jupiler Pro League, grandes ligues sud-américaines et nord-américaines...), leurs coupes nationales majeures, les compétitions continentales/internationales (Ligue des Champions, Ligue Europa, Conference League, Coupe du Monde, Euro, Copa América, éliminatoires officiels de sélections), et plus largement toute compétition qu'un supporter de football grand public reconnaîtrait facilement.
+1. Détermine si l'article concerne un ou plusieurs matchs de football MASCULIN professionnel d'IMPORTANCE RECONNUE, ayant lieu AUJOURD'HUI OU DANS LES 2 JOURS QUI VIENNENT (jusqu'à ${todayISO} + 2 jours inclus). Beaucoup de sites de pronostics publient leurs articles 1 à 2 jours avant le match : c'est normal, n'exige PAS que l'article soit publié le jour même, seulement que le MATCH ait lieu dans cette fenêtre.
+   - Accepté : grands championnats nationaux (ex: Premier League, Championship, LaLiga, Serie A, Bundesliga, Ligue 1, Liga Portugal, Eredivisie, Jupiler Pro League, grandes ligues sud-américaines et nord-américaines...), leurs coupes nationales majeures, les compétitions continentales/internationales et de sélections (Ligue des Champions, Ligue Europa, Conference League, Coupe du Monde, Euro, Ligue des Nations/Nations League, Coupe d'Afrique des Nations et ses éliminatoires, Copa América, et tout autre éliminatoire officiel de sélections), et plus largement toute compétition qu'un supporter de football grand public reconnaîtrait facilement.
    - Rejeté systématiquement (hasMatchToday=false), même si la date est claire : football féminin, équipes réserves/espoirs/jeunes/U21 et moins, divisions amateurs ou de bas niveau (ex: 4e-5e division et en dessous dans un grand pays, ligues régionales), matchs amicaux sans enjeu compétitif clair.
-   - Si la date n'est pas identifiable avec certitude (date différente, absente ou ambiguë) ou si le niveau/l'importance de la compétition n'est pas identifiable avec certitude, rejette également : hasMatchToday=false, summary=null. En cas de doute, rejette plutôt que de deviner.
+   - Si la date du match n'est pas identifiable avec certitude (absente ou ambiguë), si elle tombe hors de cette fenêtre de 3 jours, ou si le niveau/l'importance de la compétition n'est pas identifiable avec certitude, rejette également : hasMatchToday=false, summary=null, matchDateISO=null. En cas de doute, rejette plutôt que de deviner.
 2. N'invente JAMAIS de cote, statistique ou information qui n'est pas explicitement mentionnée dans le texte fourni.
 3. Si accepté, produis en français UNE SEULE LIGNE STRICTE par match identifié, SANS justification et sans aucun autre texte, au format exact :
 [drapeau emoji du pays de la compétition] Équipe A vs Équipe B : [résultat prédit]
    - Résultat prédit : "Équipe A gagne", "Équipe B gagne", "Match nul", ou le marché parié tel que mentionné dans l'article (ex: "plus de 2.5 buts") si ce n'est pas un simple résultat de victoire/nul.
    - Drapeau : celui du pays de la compétition/ligue mentionnée dans l'article (ex: 🏴󠁧󠁢󠁥󠁮󠁧󠁿 ou 🇬🇧 pour Premier League/Championship anglais, 🇪🇸 pour LaLiga, 🇮🇹 pour Serie A, 🇫🇷 pour Ligue 1, 🇩🇪 pour Bundesliga, 🇪🇺 pour Ligue des Champions/Europa League, etc.). Si le pays ou la compétition n'est pas identifiable avec certitude, OMETS le drapeau plutôt que d'en inventer un.
-   - Si plusieurs matchs, une ligne par match, séparées par un simple retour à la ligne (pas de ligne vide entre elles).
+   - Si plusieurs matchs, une ligne par match, séparées par un simple retour à la ligne (pas de ligne vide entre elles). Si les matchs ont des dates différentes entre eux, ne retiens QUE ceux dans la fenêtre acceptée (aujourd'hui + 2 jours) et ignore les autres.
    - Traduis en français même si l'article source est en anglais (garde les noms d'équipes tels quels).
-4. Réponds UNIQUEMENT avec un JSON valide de la forme : { "hasMatchToday": boolean, "summary": string | null }`;
+   - Indique aussi la date réelle du/des match(s) retenus au format AAAA-MM-JJ dans matchDateISO (si plusieurs matchs à des dates différentes, prends la date du premier match retenu).
+4. Réponds UNIQUEMENT avec un JSON valide de la forme : { "hasMatchToday": boolean, "summary": string | null, "matchDateISO": string | null }`;
 
   const response = await aiClient.chat.completions.create({
     model: env.openaiModel,
@@ -176,10 +186,22 @@ RÈGLES ABSOLUES :
 
   const raw = response.choices[0]?.message?.content ?? "{}";
   const parsed = JSON.parse(raw) as Partial<FootballArticleAnalysis>;
+  const matchDateISO = typeof parsed.matchDateISO === "string" && /^\d{4}-\d{2}-\d{2}$/.test(parsed.matchDateISO) ? parsed.matchDateISO : null;
   return {
     hasMatchToday: !!parsed.hasMatchToday,
     summary: parsed.hasMatchToday ? parsed.summary ?? null : null,
+    matchDateISO: parsed.hasMatchToday ? matchDateISO : null,
   };
+}
+
+// Convertit une date AAAA-MM-JJ (fuseau du projet) en Date UTC ancrée à midi
+// local — évite tout souci de bascule de jour aux limites de fuseau, tout en
+// restant identifiable sans ambiguïté par dateKeyInTimezone côté vérification
+// des résultats (matchResultService.ts).
+function matchDateISOToUtc(iso: string, timezone: string): Date | null {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return zonedTimeToUtc(Number(m[1]), Number(m[2]), Number(m[3]), 12, 0, timezone);
 }
 
 // Filtre par mots-clés football : un article n'est retenu que si son titre
@@ -332,14 +354,15 @@ export async function checkSource(source: ContentSource): Promise<void> {
             await logEvent({
               projectId: source.projectId,
               category: "feedWatcher",
-              message: `Article ignoré (aucun match du jour identifié avec certitude) : "${title}".`,
+              message: `Article ignoré (aucun match retenu dans les 3 prochains jours avec certitude) : "${title}".`,
               metadata: { sourceId: source.id, sourceName: source.name, link },
             });
             continue;
           }
 
+          const matchDate = analysis.matchDateISO ? matchDateISOToUtc(analysis.matchDateISO, projectTimezone) : null;
           await prisma.digestItem.create({
-            data: { projectId: source.projectId, contentSourceId: source.id, title: analysis.summary, link, summary: null },
+            data: { projectId: source.projectId, contentSourceId: source.id, title: analysis.summary, link, summary: null, matchDate },
           });
           await recordRecentTitle(source.projectId, title);
         } catch (err: any) {
