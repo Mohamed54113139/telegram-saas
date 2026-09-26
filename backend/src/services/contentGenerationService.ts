@@ -26,7 +26,7 @@ export async function generateMessageContent(
   // travail l'est (Règle 1).
   let baseContent = template.originalContent;
   if (baseContent.includes("{PRONOS_DU_JOUR}")) {
-    const digest = await resolveDigestVariable(project.id);
+    const digest = await resolveDigestVariable(project.id, project.timezone);
     baseContent = baseContent.split("{PRONOS_DU_JOUR}").join(digest);
   }
 

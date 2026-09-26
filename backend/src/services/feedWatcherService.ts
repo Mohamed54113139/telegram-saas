@@ -154,24 +154,29 @@ async function analyzeFootballArticle(articleText: string, timezone: string): Pr
     .format(now)
     .toLowerCase();
   const todayISO = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now); // YYYY-MM-DD
+  const tomorrowISO = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+  const dayAfterISO = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000));
+  const allowedDates = [todayISO, tomorrowISO, dayAfterISO];
 
   const systemPrompt = `Tu analyses un article de site de pronostics football pour un système de publication automatisée.
 
 Nous sommes aujourd'hui le ${todayLabel}, soit ${todayISO} au format AAAA-MM-JJ (fuseau horaire du projet).
 
+Les SEULES dates de match acceptées sont exactement ces 3 dates (ne calcule rien toi-même, utilise cette liste telle quelle) : ${allowedDates.join(", ")}.
+
 RÈGLES ABSOLUES :
-1. Détermine si l'article concerne un ou plusieurs matchs de football MASCULIN professionnel d'IMPORTANCE RECONNUE, ayant lieu AUJOURD'HUI OU DANS LES 2 JOURS QUI VIENNENT (jusqu'à ${todayISO} + 2 jours inclus). Beaucoup de sites de pronostics publient leurs articles 1 à 2 jours avant le match : c'est normal, n'exige PAS que l'article soit publié le jour même, seulement que le MATCH ait lieu dans cette fenêtre.
+1. Détermine si l'article concerne un ou plusieurs matchs de football MASCULIN professionnel d'IMPORTANCE RECONNUE, dont la date EXACTE (telle qu'explicitement mentionnée dans l'article — jamais déduite ou supposée) correspond à l'une des 3 dates listées ci-dessus. Beaucoup de sites de pronostics publient leurs articles 1 à 2 jours avant le match : c'est normal, n'exige PAS que l'article soit publié le jour même, seulement que la date du MATCH, explicitement donnée dans le texte, soit l'une des 3 dates autorisées.
    - Accepté : grands championnats nationaux (ex: Premier League, Championship, LaLiga, Serie A, Bundesliga, Ligue 1, Liga Portugal, Eredivisie, Jupiler Pro League, grandes ligues sud-américaines et nord-américaines...), leurs coupes nationales majeures, les compétitions continentales/internationales et de sélections (Ligue des Champions, Ligue Europa, Conference League, Coupe du Monde, Euro, Ligue des Nations/Nations League, Coupe d'Afrique des Nations et ses éliminatoires, Copa América, et tout autre éliminatoire officiel de sélections), et plus largement toute compétition qu'un supporter de football grand public reconnaîtrait facilement.
-   - Rejeté systématiquement (hasMatchToday=false), même si la date est claire : football féminin, équipes réserves/espoirs/jeunes/U21 et moins, divisions amateurs ou de bas niveau (ex: 4e-5e division et en dessous dans un grand pays, ligues régionales), matchs amicaux sans enjeu compétitif clair.
-   - Si la date du match n'est pas identifiable avec certitude (absente ou ambiguë), si elle tombe hors de cette fenêtre de 3 jours, ou si le niveau/l'importance de la compétition n'est pas identifiable avec certitude, rejette également : hasMatchToday=false, summary=null, matchDateISO=null. En cas de doute, rejette plutôt que de deviner.
+   - Rejeté systématiquement (hasMatchToday=false), même si la date est dans la liste autorisée : football féminin, équipes réserves/espoirs/jeunes/U21 et moins, divisions amateurs ou de bas niveau (ex: 4e-5e division et en dessous dans un grand pays, ligues régionales), matchs amicaux sans enjeu compétitif clair.
+   - Rejette également (hasMatchToday=false, summary=null, matchDateISO=null) si : la date du match n'est pas donnée EXPLICITEMENT et sans ambiguïté dans le texte (ne déduis jamais une date à partir de la date de publication de l'article ou d'indices vagues comme "ce week-end" sans date précise), si cette date explicite ne correspond à AUCUNE des 3 dates autorisées, ou si le niveau/l'importance de la compétition n'est pas identifiable avec certitude. En cas de doute, rejette plutôt que de deviner.
 2. N'invente JAMAIS de cote, statistique ou information qui n'est pas explicitement mentionnée dans le texte fourni.
 3. Si accepté, produis en français UNE SEULE LIGNE STRICTE par match identifié, SANS justification et sans aucun autre texte, au format exact :
 [drapeau emoji du pays de la compétition] Équipe A vs Équipe B : [résultat prédit]
    - Résultat prédit : "Équipe A gagne", "Équipe B gagne", "Match nul", ou le marché parié tel que mentionné dans l'article (ex: "plus de 2.5 buts") si ce n'est pas un simple résultat de victoire/nul.
    - Drapeau : celui du pays de la compétition/ligue mentionnée dans l'article (ex: 🏴󠁧󠁢󠁥󠁮󠁧󠁿 ou 🇬🇧 pour Premier League/Championship anglais, 🇪🇸 pour LaLiga, 🇮🇹 pour Serie A, 🇫🇷 pour Ligue 1, 🇩🇪 pour Bundesliga, 🇪🇺 pour Ligue des Champions/Europa League, etc.). Si le pays ou la compétition n'est pas identifiable avec certitude, OMETS le drapeau plutôt que d'en inventer un.
-   - Si plusieurs matchs, une ligne par match, séparées par un simple retour à la ligne (pas de ligne vide entre elles). Si les matchs ont des dates différentes entre eux, ne retiens QUE ceux dans la fenêtre acceptée (aujourd'hui + 2 jours) et ignore les autres.
+   - Si plusieurs matchs, une ligne par match, séparées par un simple retour à la ligne (pas de ligne vide entre elles). Si les matchs ont des dates différentes entre eux, ne retiens QUE ceux dont la date explicite est l'une des 3 dates autorisées, et ignore les autres.
    - Traduis en français même si l'article source est en anglais (garde les noms d'équipes tels quels).
-   - Indique aussi la date réelle du/des match(s) retenus au format AAAA-MM-JJ dans matchDateISO (si plusieurs matchs à des dates différentes, prends la date du premier match retenu).
+   - Indique aussi, dans matchDateISO, la date exacte (parmi les 3 dates autorisées ci-dessus, copiée telle quelle) du/des match(s) retenus (si plusieurs matchs à des dates différentes, prends la date du premier match retenu).
 4. Réponds UNIQUEMENT avec un JSON valide de la forme : { "hasMatchToday": boolean, "summary": string | null, "matchDateISO": string | null }`;
 
   const response = await aiClient.chat.completions.create({
@@ -186,10 +191,15 @@ RÈGLES ABSOLUES :
 
   const raw = response.choices[0]?.message?.content ?? "{}";
   const parsed = JSON.parse(raw) as Partial<FootballArticleAnalysis>;
-  const matchDateISO = typeof parsed.matchDateISO === "string" && /^\d{4}-\d{2}-\d{2}$/.test(parsed.matchDateISO) ? parsed.matchDateISO : null;
+  // Garde-fou côté serveur, indépendant de la fiabilité du modèle : une
+  // matchDateISO qui ne fait pas partie des 3 dates explicitement autorisées
+  // (ex: l'IA a mal compté, ou a répondu avec la date de publication de
+  // l'article) invalide l'acceptation entière plutôt que de laisser passer
+  // un match hors fenêtre.
+  const matchDateISO = typeof parsed.matchDateISO === "string" && allowedDates.includes(parsed.matchDateISO) ? parsed.matchDateISO : null;
   return {
-    hasMatchToday: !!parsed.hasMatchToday,
-    summary: parsed.hasMatchToday ? parsed.summary ?? null : null,
+    hasMatchToday: !!parsed.hasMatchToday && !!matchDateISO,
+    summary: parsed.hasMatchToday && matchDateISO ? parsed.summary ?? null : null,
     matchDateISO: parsed.hasMatchToday ? matchDateISO : null,
   };
 }

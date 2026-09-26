@@ -1,4 +1,10 @@
 import { prisma } from "../config/prisma";
+import { localDateParts } from "../utils/timezone";
+
+function dateKeyInTimezone(date: Date, timezone: string): string {
+  const { year, month, day } = localDateParts(date, timezone);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
 
 // Parse une ligne du format strict produit par analyzeFootballArticle
 // (feedWatcherService.ts) : "[drapeau emoji] Équipe A vs Équipe B : résultat
@@ -28,12 +34,23 @@ function parseMatchLine(line: string): { teamA: string; teamB: string; predicted
 // Récupère les éléments accumulés non encore utilisés pour ce projet, les
 // formate en liste, crée une entrée de suivi (MatchResult) pour chaque match
 // identifié afin de vérifier automatiquement le résultat après coup, puis
-// marque les éléments comme consommés.
-export async function resolveDigestVariable(projectId: string): Promise<string> {
-  const items = await prisma.digestItem.findMany({
+// marque les éléments consommés.
+//
+// Un article "preview" est souvent collecté 1-2 jours avant le match (voir
+// feedWatcherService.ts) : sans filtre ici, un message "PRONOSTICS DU JOUR"
+// pourrait mélanger des matchs d'aujourd'hui avec des matchs d'après-demain,
+// ce qui n'a plus rien à voir avec "aujourd'hui" pour qui le lit. On ne
+// consomme donc QUE les éléments dont la vraie date de match (matchDate,
+// repli sur createdAt si absente) tombe sur la date du jour, dans le fuseau
+// du projet — les autres restent en attente jusqu'à leur propre jour.
+export async function resolveDigestVariable(projectId: string, timezone: string): Promise<string> {
+  const allPending = await prisma.digestItem.findMany({
     where: { projectId, consumed: false },
     orderBy: { createdAt: "asc" },
   });
+
+  const todayKey = dateKeyInTimezone(new Date(), timezone);
+  const items = allPending.filter((item) => dateKeyInTimezone(item.matchDate ?? item.createdAt, timezone) === todayKey);
 
   if (items.length === 0) {
     return "Aucune information trouvée aujourd'hui.";
