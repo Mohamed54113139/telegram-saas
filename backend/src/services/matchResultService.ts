@@ -50,6 +50,16 @@ async function fetchFixturesForDate(dateStr: string): Promise<ApiFootballFixture
     throw new Error(`L'API-Football a répondu ${res.status}.`);
   }
   const data = (await res.json()) as any;
+  // API-Football renvoie souvent une erreur (clé invalide, plan insuffisant,
+  // quota dépassé...) avec un statut HTTP 200 tout à fait normal : l'erreur
+  // réelle est dans data.errors, jamais dans le code HTTP. Sans cette
+  // vérification, une clé invalide donnerait silencieusement "aucun match
+  // trouvé" chaque jour, indéfiniment, sans jamais rien logger d'explicite.
+  const errors = data?.errors;
+  const errorMessages = Array.isArray(errors) ? errors : errors && typeof errors === "object" ? Object.values(errors) : [];
+  if (errorMessages.length > 0) {
+    throw new Error(`API-Football a renvoyé une erreur : ${errorMessages.join(" / ")}`);
+  }
   return (data.response ?? []).map((f: any) => ({
     teamHome: f.teams?.home?.name ?? "",
     teamAway: f.teams?.away?.name ?? "",
